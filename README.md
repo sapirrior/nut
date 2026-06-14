@@ -117,11 +117,11 @@ nurl ping https://api.github.com --count 3
 
 *Output:*
 ```text
-200 OK  88ms
-200 OK  92ms
-200 OK  89ms
+200  OK  api.github.com  88ms
+200  OK  api.github.com  92ms
+200  OK  api.github.com  89ms
 
-min: 88ms  avg: 89ms  max: 92ms
+min 88ms  avg 89ms  max 92ms
 ```
 
 #### 2. Dry-Run Inspection
@@ -133,10 +133,12 @@ nurl inspect post https://api.example.com/data -H "Authorization: Bearer confide
 
 *Output:*
 ```http
-POST https://api.example.com/data
-Content-Type: application/json
-Authorization: [hidden]
-Content-Length: 0
+> POST /data HTTP/1.1
+> Host: api.example.com
+> Content-Type: application/json
+> Authorization: [hidden]
+> Content-Length: 0
+>
 ```
 *Note: Sensitive values like `Authorization` tokens are automatically printed as `[hidden]` to prevent leaking secrets in console logs.*
 
@@ -169,7 +171,6 @@ X-Developer-Client = "nurl"
 For quick shell customizations, `nurl` respects environment variables:
 
 - `NURL_BEARER`: Automatically injects `Authorization: Bearer <token>` into requests.
-- `NO_COLOR`: Disables all terminal styling.
 - `NURL_TIMEOUT`: Overrides default request timeouts.
 
 ---

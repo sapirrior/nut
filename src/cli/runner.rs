@@ -166,13 +166,11 @@ fn execute_inner(method: &str, url: &str, body_source: BodySource, common: &Comm
     }
 
     if !common.silent {
-        let color_active = crate::output::colors::should_color(common.color, common.no_color);
         crate::output::printer::print_response(
             res_info.clone(),
             common.include,
             common.output.clone(),
             common.verbose,
-            color_active,
             common.raw,
         );
 

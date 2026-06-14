@@ -47,16 +47,14 @@ pub fn run(args: PingArgs) {
         match res {
             Ok((status, status_text)) => {
                 latencies.push(duration);
-                if count == 1 {
-                    println!("{} {}  {}ms  {}", status, status_text, duration, host);
-                } else {
-                    println!("{} {}  {}ms", status, status_text, duration);
-                }
+                println!("{}  {}  {}  {}ms", status, status_text, host, duration);
             }
             Err(e) => {
                 if !args.common.silent {
-                    eprintln!("error: ping failed");
-                    eprintln!("  details: {}", e);
+                    crate::cli::error_handler::print_custom_error(
+                        "Ping failed",
+                        &[&e.to_string()],
+                    );
                 }
                 std::process::exit(e.exit_code());
             }
@@ -68,7 +66,7 @@ pub fn run(args: PingArgs) {
         let max = latencies.iter().max().unwrap();
         let sum: u64 = latencies.iter().sum();
         let avg = sum / latencies.len() as u64;
-        println!("\nmin: {}ms  avg: {}ms  max: {}ms", min, avg, max);
+        println!("\nmin {}ms  avg {}ms  max {}ms", min, avg, max);
     }
 }
 

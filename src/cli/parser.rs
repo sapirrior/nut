@@ -226,10 +226,6 @@ pub struct CommonArgs {
     pub dump_header: Option<String>,
     #[arg(long)]
     pub trace: Option<String>,
-    #[arg(long, env = "NURL_COLOR")]
-    pub color: bool,
-    #[arg(long)]
-    pub no_color: bool,
     #[arg(long)]
     pub format: Option<String>,
 }

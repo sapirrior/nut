@@ -27,16 +27,27 @@ pub fn run(args: ResolveArgs) {
                 found = true;
                 let ip = addr.ip();
                 let record_type = if ip.is_ipv4() { "A" } else { "AAAA" };
-                println!("{} → {}  ({})", target_host, ip, record_type);
+                println!("{}\t{}\t{}", target_host, ip, record_type);
             }
             if !found {
-                eprintln!("error: could not resolve host '{}'", target_host);
+                crate::cli::error_handler::print_custom_error(
+                    "DNS resolution failed",
+                    &[
+                        &target_host,
+                        "Check the hostname or your network connection",
+                    ],
+                );
                 std::process::exit(2);
             }
         }
         Err(e) => {
-            eprintln!("error: DNS resolution failed for host '{}'", target_host);
-            eprintln!("  details: {}", e);
+            crate::cli::error_handler::print_custom_error(
+                "DNS resolution failed",
+                &[
+                    &target_host,
+                    &e.to_string(),
+                ],
+            );
             std::process::exit(2);
         }
     }

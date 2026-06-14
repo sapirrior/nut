@@ -80,25 +80,44 @@ pub fn run(args: DownloadArgs) {
     }
 
     if args.common.verbose && !args.common.silent {
-        eprintln!("* Connecting to {}", clean_url);
-        eprintln!("> GET {}", clean_url);
+        let parsed_url = url::Url::parse(&clean_url).ok();
+        let host = parsed_url.as_ref().and_then(|u| u.host_str()).unwrap_or(&clean_url);
+        let port = parsed_url.as_ref().and_then(|u| u.port()).unwrap_or(if clean_url.starts_with("https") { 443 } else { 80 });
+        crate::output::theme::print_notice(&format!("connecting to {} port {}", host, port));
+        if clean_url.starts_with("https") {
+            crate::output::theme::print_notice("TLS handshake complete");
+        }
+        eprintln!();
+
+        let path_and_query = parsed_url.as_ref()
+            .map(|u| {
+                let mut pq = u.path().to_string();
+                if let Some(q) = u.query() {
+                    pq.push('?');
+                    pq.push_str(q);
+                }
+                pq
+            })
+            .unwrap_or_else(|| "/".to_string());
+        crate::output::theme::print_request_line(&format!("GET {} HTTP/1.1", path_and_query));
+        crate::output::theme::print_request_line(&format!("Host: {}", host));
         for (k, v) in &headers {
             let redacted_val = crate::utils::headers::redact_header_value(k, v);
-            eprintln!("> {}: {}", k, redacted_val);
+            crate::output::theme::print_request_line(&format!("{}: {}", k, redacted_val));
         }
-        eprintln!(">");
+        eprintln!();
     }
 
     let response = match request.call() {
         Ok(res) => res,
         Err(e) => {
             if !args.common.silent {
-                eprintln!("error: could not connect to host");
-                eprintln!("  details: {}", e);
-                std::process::exit(2);
-            } else {
-                std::process::exit(2);
+                crate::cli::error_handler::print_custom_error(
+                    "Could not connect to host",
+                    &[&e.to_string()],
+                );
             }
+            std::process::exit(2);
         }
     };
 
@@ -115,12 +134,12 @@ pub fn run(args: DownloadArgs) {
         Ok(f) => f,
         Err(e) => {
             if !args.common.silent {
-                eprintln!("error: could not open file for writing");
-                eprintln!("  details: {}", e);
-                std::process::exit(6);
-            } else {
-                std::process::exit(6);
+                crate::cli::error_handler::print_custom_error(
+                    "Could not open file for writing",
+                    &[&e.to_string()],
+                );
             }
+            std::process::exit(6);
         }
     };
 
@@ -141,13 +160,13 @@ pub fn run(args: DownloadArgs) {
     let show_progress = !args.common.silent && (args.progress || std::io::stderr().is_terminal());
 
     if show_progress {
-        eprintln!("downloading {}", filename);
-        eprintln!("  url: {}", clean_url);
-        if total_len > 0 {
-            eprintln!("  size: {:.1} MB", total_len as f64 / 1024.0 / 1024.0);
+        crate::output::theme::print_notice(&format!("downloading  {}", filename));
+        let size_str = if total_len > 0 {
+            format!("{:.1} MB", total_len as f64 / 1024.0 / 1024.0)
         } else {
-            eprintln!("  size: unknown");
-        }
+            "unknown".to_string()
+        };
+        crate::output::theme::print_notice(&format!("{}  {}", clean_url, size_str));
         eprintln!();
     }
 
@@ -163,23 +182,23 @@ pub fn run(args: DownloadArgs) {
             Ok(n) => n,
             Err(e) => {
                 if !args.common.silent {
-                    eprintln!("error: connection closed during download");
-                    eprintln!("  details: {}", e);
-                    std::process::exit(2);
-                } else {
-                    std::process::exit(2);
+                    crate::cli::error_handler::print_custom_error(
+                        "Connection closed during download",
+                        &[&e.to_string()],
+                    );
                 }
+                std::process::exit(2);
             }
         };
 
         if let Err(e) = file.write_all(&buffer[..n]) {
             if !args.common.silent {
-                eprintln!("error: could not write response to file");
-                eprintln!("  details: {}", e);
-                std::process::exit(6);
-            } else {
-                std::process::exit(6);
+                crate::cli::error_handler::print_custom_error(
+                    "Could not write response to file",
+                    &[&e.to_string()],
+                );
             }
+            std::process::exit(6);
         }
 
         downloaded += n as u64;
@@ -197,16 +216,22 @@ pub fn run(args: DownloadArgs) {
             };
 
             let remaining_time = if total_len > downloaded && speed > 0.0 {
-                format!("{:.0}s remaining", (total_len - downloaded) as f64 / speed)
+                format!("{:.0}s left", (total_len - downloaded) as f64 / speed)
+            } else {
+                "unknown left".to_string()
+            };
+
+            let total_str = if total_len > 0 {
+                format!("{:.1} MB", total_len as f64 / 1024.0 / 1024.0)
             } else {
                 "unknown".to_string()
             };
 
             // Carriage return to overwrite progress line
             eprint!(
-                "\r  {:.1} MB / {:.1} MB  {}%  {:.1} MB/s  {}",
+                "\r  {:.1} MB / {}  {}%  {:.1} MB/s  {}",
                 downloaded as f64 / 1024.0 / 1024.0,
-                total_len as f64 / 1024.0 / 1024.0,
+                total_str,
                 progress_pct,
                 speed_mb,
                 remaining_time
@@ -216,6 +241,13 @@ pub fn run(args: DownloadArgs) {
     }
 
     if show_progress {
-        eprintln!("\n\nDownload completed successfully.");
+        let elapsed = start_time.elapsed().as_secs_f64();
+        let total_str = if total_len > 0 {
+            format!("{:.1} MB", total_len as f64 / 1024.0 / 1024.0)
+        } else {
+            format!("{:.1} MB", downloaded as f64 / 1024.0 / 1024.0)
+        };
+        eprintln!();
+        crate::output::theme::print_success("Download complete", Some(&format!("{}  in {:.1}s", total_str, elapsed)));
     }
 }

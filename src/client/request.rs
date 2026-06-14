@@ -39,10 +39,13 @@ pub fn execute_request(config: RequestConfig) -> Result<ResponseInfo, NurlError>
     if config.verbose && !config.silent {
         let parsed_url = url::Url::parse(clean_url).ok();
         let host = parsed_url.as_ref().and_then(|u| u.host_str()).unwrap_or(clean_url);
-        println!("* Connecting to {}", host);
+        let port = parsed_url.as_ref().and_then(|u| u.port()).unwrap_or(if clean_url.starts_with("https") { 443 } else { 80 });
+        crate::output::theme::print_notice(&format!("connecting to {} port {}", host, port));
         if clean_url.starts_with("https") {
-            println!("* TLS handshake complete");
+            crate::output::theme::print_notice("TLS handshake complete");
         }
+        eprintln!();
+
         let path_and_query = parsed_url.as_ref()
             .map(|u| {
                 let mut pq = u.path().to_string();
@@ -53,18 +56,18 @@ pub fn execute_request(config: RequestConfig) -> Result<ResponseInfo, NurlError>
                 pq
             })
             .unwrap_or_else(|| "/".to_string());
-        println!("> {} {} HTTP/1.1", config.method, path_and_query);
+        crate::output::theme::print_request_line(&format!("{} {} HTTP/1.1", config.method, path_and_query));
         if let Some(ref u) = parsed_url {
-            println!("> Host: {}", u.host_str().unwrap_or(""));
+            crate::output::theme::print_request_line(&format!("Host: {}", u.host_str().unwrap_or("")));
         }
         for (k, v) in &config.headers {
             let redacted_val = crate::utils::headers::redact_header_value(k, v);
-            println!("> {}: {}", k, redacted_val);
+            crate::output::theme::print_request_line(&format!("{}: {}", k, redacted_val));
         }
         if let Some(ref body) = config.body {
-            println!("> [{} bytes payload]", body.len());
+            crate::output::theme::print_request_line(&format!("[{} bytes payload]", body.len()));
         }
-        println!(">");
+        eprintln!();
     }
 
     let mut request = match config.method.as_str() {

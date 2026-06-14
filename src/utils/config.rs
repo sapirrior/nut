@@ -17,7 +17,6 @@ pub struct DefaultsConfig {
     pub follow_redirects: Option<bool>,
     pub max_redirects: Option<u32>,
     pub user_agent: Option<String>,
-    pub color: Option<bool>,
     pub compressed: Option<bool>,
     pub retry: Option<u32>,
 }
@@ -80,11 +79,6 @@ pub fn merge_config_into_args(args: &mut CommonArgs, config: &ConfigFile) {
         if args.user_agent.is_none() {
             if let Some(ref val) = defaults.user_agent {
                 args.user_agent = Some(val.clone());
-            }
-        }
-        if !args.color {
-            if let Some(val) = defaults.color {
-                args.color = val;
             }
         }
         if !args.compressed {

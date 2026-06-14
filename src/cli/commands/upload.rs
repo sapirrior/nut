@@ -145,13 +145,11 @@ pub fn run(args: UploadArgs) {
     match execute_request(config) {
         Ok(res_info) => {
             if !args.common.silent {
-                let color_active = crate::output::colors::should_color(args.common.color, args.common.no_color);
                 crate::output::printer::print_response(
                     res_info.clone(),
                     args.common.include,
                     args.common.output,
                     args.common.verbose,
-                    color_active,
                     args.common.raw,
                 );
             }

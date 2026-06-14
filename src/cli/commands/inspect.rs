@@ -72,13 +72,30 @@ pub fn run(args: InspectArgs) {
         }
     }
 
-    println!("{} {}", args.method.to_uppercase(), clean_url);
+    let parsed_url = url::Url::parse(&clean_url).ok();
+    let host = parsed_url.as_ref().and_then(|u| u.host_str()).unwrap_or(&clean_url);
+    let path_and_query = parsed_url.as_ref()
+        .map(|u| {
+            let mut pq = u.path().to_string();
+            if let Some(q) = u.query() {
+                pq.push('?');
+                pq.push_str(q);
+            }
+            pq
+        })
+        .unwrap_or_else(|| "/".to_string());
+
+    println!("> {} {} HTTP/1.1", args.method.to_uppercase(), path_and_query);
+    println!("> Host: {}", host);
     for (k, v) in &headers {
         let redacted = crate::utils::headers::redact_header_value(k, v);
-        println!("{}: {}", k, redacted);
+        println!("> {}: {}", k, redacted);
     }
-    println!();
+    println!(">");
     if let Some(ref b) = body {
-        print!("{}", String::from_utf8_lossy(b));
+        let body_str = String::from_utf8_lossy(b);
+        for line in body_str.lines() {
+            println!("> {}", line);
+        }
     }
 }
