@@ -23,6 +23,12 @@ int nurl_runner_execute(const char *command, const char *url, const CommonArgs *
         return nurl_cmd_resolve(url, common);
     } else if (strcasecmp(command, "PING") == 0) {
         return nurl_cmd_ping(url, common);
+    } else if (strcasecmp(command, "DOWNLOAD") == 0) {
+        return nurl_cmd_download(url, common);
+    } else if (strcasecmp(command, "UPLOAD") == 0) {
+        return nurl_cmd_upload(url, common);
+    } else if (strcasecmp(command, "INSPECT") == 0) {
+        return nurl_cmd_inspect(url, common);
     }
 
     fprintf(stderr, "Error: Command '%s' is not supported yet.\n", command);

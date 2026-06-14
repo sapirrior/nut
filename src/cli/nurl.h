@@ -82,6 +82,15 @@ typedef struct {
     // Ping specific
     unsigned int ping_count;
     unsigned long ping_interval;
+
+    // Download & Upload specific
+    bool resume;
+    bool progress;
+    char *upload_file;
+    char *upload_name;
+    char *upload_mime;
+    char **upload_fields;
+    size_t upload_fields_count;
 } CommonArgs;
 
 typedef enum {

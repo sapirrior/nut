@@ -11,6 +11,7 @@ void nurl_cli_init_args(CommonArgs *args) {
     args->connect_timeout = 10;
     args->ping_count = 1;
     args->ping_interval = 1000;
+    args->upload_name = strdup("file");
 }
 
 static bool is_subcommand(const char *arg) {
@@ -49,6 +50,15 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"raw",             no_argument,       NULL, 5},
         {"count",           required_argument, NULL, 6},
         {"interval",        required_argument, NULL, 7},
+        {"resume",          no_argument,       NULL, 8},
+        {"progress",        no_argument,       NULL, 9},
+        {"mime",            required_argument, NULL, 10},
+        {"name",            required_argument, NULL, 11},
+        {"field",           required_argument, NULL, 12},
+        {"cookie",          required_argument, NULL, 'b'},
+        {"cookie-jar",      required_argument, NULL, 'c'},
+        {"session",         required_argument, NULL, 13},
+        {"write-out",       required_argument, NULL, 'w'},
         {"help",            no_argument,       NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
@@ -56,7 +66,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
     int opt;
     opterr = 0; // Disable default getopt error printing
 
-    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshk", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'u':
                 if (args->user) free(args->user);
@@ -154,6 +164,75 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 7:
                 args->ping_interval = strtoul(optarg, NULL, 10);
                 break;
+            case 8:
+                args->resume = true;
+                break;
+            case 9:
+                args->progress = true;
+                break;
+            case 10:
+                if (args->upload_mime) free(args->upload_mime);
+                args->upload_mime = strdup(optarg);
+                if (!args->upload_mime) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 11:
+                if (args->upload_name) free(args->upload_name);
+                args->upload_name = strdup(optarg);
+                if (!args->upload_name) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 12: {
+                char **temp = realloc(args->upload_fields, sizeof(char *) * (args->upload_fields_count + 1));
+                if (!temp) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                args->upload_fields = temp;
+                args->upload_fields[args->upload_fields_count] = strdup(optarg);
+                if (!args->upload_fields[args->upload_fields_count]) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                args->upload_fields_count++;
+                break;
+            }
+            case 'b':
+                if (args->cookie) free(args->cookie);
+                args->cookie = strdup(optarg);
+                if (!args->cookie) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 'c':
+                if (args->cookie_jar) free(args->cookie_jar);
+                args->cookie_jar = strdup(optarg);
+                if (!args->cookie_jar) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 13:
+                if (args->session) free(args->session);
+                args->session = strdup(optarg);
+                if (!args->session) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 'w':
+                if (args->write_out) free(args->write_out);
+                args->write_out = strdup(optarg);
+                if (!args->write_out) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
             case 'h':
                 return -1; // Help requested
             default:
@@ -172,16 +251,26 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         const char *first = argv[optind];
         if (is_subcommand(first)) {
             *command = strdup(first);
-            *url = strdup(argv[optind + 1]);
+            if (strcasecmp(first, "upload") == 0) {
+                if (remaining >= 3) {
+                    *url = strdup(argv[optind + 1]);
+                    args->upload_file = strdup(argv[optind + 2]);
+                } else {
+                    fprintf(stderr, "Error: Subcommand 'upload' requires target URL and local file path.\n");
+                    free(*command);
+                    *command = NULL;
+                    return -1;
+                }
+            } else {
+                *url = strdup(argv[optind + 1]);
+            }
         } else {
             *command = strdup("get");
             *url = strdup(first);
         }
     } else {
-        // Only 1 argument remaining
         const char *first = argv[optind];
         if (is_subcommand(first)) {
-            // A subcommand without a URL
             fprintf(stderr, "Error: Subcommand '%s' requires a target URL.\n", first);
             return -1;
         } else {
@@ -201,6 +290,19 @@ void nurl_cli_free_args(CommonArgs *args) {
         free(args->data);
         free(args->cacert);
         free(args->output);
+        free(args->upload_file);
+        free(args->upload_name);
+        free(args->upload_mime);
+        free(args->cookie);
+        free(args->cookie_jar);
+        free(args->session);
+        free(args->write_out);
+        if (args->upload_fields) {
+            for (size_t i = 0; i < args->upload_fields_count; i++) {
+                free(args->upload_fields[i]);
+            }
+            free(args->upload_fields);
+        }
         if (args->header) {
             for (size_t i = 0; i < args->header_count; i++) {
                 free(args->header[i]);

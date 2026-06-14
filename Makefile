@@ -7,7 +7,8 @@ SRCS = src/client/nurl_net.c src/client/nurl_tls.c src/client/nurl_http.c \
        src/cli/commands/get.c src/cli/commands/post.c src/cli/commands/put.c \
        src/cli/commands/delete.c src/cli/commands/head.c src/cli/commands/patch.c \
        src/cli/commands/options.c src/cli/commands/resolve.c src/cli/commands/ping.c \
-       src/utils/nurl_utils.c src/main.c
+       src/cli/commands/download.c src/cli/commands/upload.c src/cli/commands/inspect.c \
+       src/utils/nurl_utils.c src/utils/nurl_cookies.c src/utils/nurl_config.c src/main.c
 OBJS = $(SRCS:.c=.o)
 TARGET = nurl
 

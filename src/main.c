@@ -5,6 +5,7 @@
 #include "nurl.h"
 #include "nurl_cli.h"
 #include "nurl_runner.h"
+#include "nurl_config.h"
 
 static void print_help(const char *prog_name) {
     printf("NetworkURL (nurl) — A clean, fast, and structured HTTP client CLI\n\n");
@@ -53,6 +54,9 @@ int main(int argc, char **argv) {
         nurl_cli_free_args(&args);
         return 1;
     }
+
+    // Load and merge default configurations
+    nurl_config_load_and_merge(&args);
 
     // Convert command to uppercase to match standard HTTP verbs
     char *method = strdup(command);

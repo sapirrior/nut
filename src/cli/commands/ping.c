@@ -96,7 +96,7 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
         if (ret == 0) {
             latencies[success_count++] = duration;
             if (!common->silent) {
-                printf("%d  %s  %s  %lumsping\n", status, status_text, host, duration);
+                printf("%d  %s  %s  %lums\n", status, status_text, host, duration);
             }
             free(status_text);
         } else {
