@@ -61,13 +61,18 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"write-out",       required_argument, NULL, 'w'},
         {"version",         no_argument,       NULL, 'V'},
         {"help",            no_argument,       NULL, 'h'},
+        {"cert",            required_argument, NULL, 14},
+        {"key",             required_argument, NULL, 15},
+        {"proxy",           required_argument, NULL, 'x'},
+        {"proxy-user",      required_argument, NULL, 16},
+        {"no-proxy",        required_argument, NULL, 17},
         {NULL, 0, NULL, 0}
     };
 
     int opt;
     opterr = 0; // Disable default getopt error printing
 
-    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:V", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'u':
                 if (args->user) free(args->user);
@@ -234,6 +239,46 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                     return -1;
                 }
                 break;
+            case 14:
+                if (args->cert) free(args->cert);
+                args->cert = strdup(optarg);
+                if (!args->cert) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 15:
+                if (args->key) free(args->key);
+                args->key = strdup(optarg);
+                if (!args->key) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 'x':
+                if (args->proxy) free(args->proxy);
+                args->proxy = strdup(optarg);
+                if (!args->proxy) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 16:
+                if (args->proxy_user) free(args->proxy_user);
+                args->proxy_user = strdup(optarg);
+                if (!args->proxy_user) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 17:
+                if (args->no_proxy) free(args->no_proxy);
+                args->no_proxy = strdup(optarg);
+                if (!args->no_proxy) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
             case 'V':
                 printf("nurl %s\n", NURL_VERSION);
                 exit(0);
@@ -301,6 +346,11 @@ void nurl_cli_free_args(CommonArgs *args) {
         free(args->cookie_jar);
         free(args->session);
         free(args->write_out);
+        free(args->cert);
+        free(args->key);
+        free(args->proxy);
+        free(args->proxy_user);
+        free(args->no_proxy);
         if (args->upload_fields) {
             for (size_t i = 0; i < args->upload_fields_count; i++) {
                 free(args->upload_fields[i]);

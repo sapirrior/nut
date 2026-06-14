@@ -14,7 +14,7 @@ static unsigned long get_elapsed_ms(struct timeval start, struct timeval end) {
 }
 
 static int ping_once(const char *method, const char *path, const char *host, int port, const CommonArgs *common, unsigned long *duration_ms, int *status_out, char **status_text_out) {
-    int sock_fd = nurl_net_connect(host, port);
+    int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
     if (sock_fd < 0) {
         return -1;
     }
@@ -23,7 +23,7 @@ static int ping_once(const char *method, const char *path, const char *host, int
         nurl_net_set_timeout(sock_fd, common->timeout);
     }
 
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert);
+    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key);
     if (!tls) {
         nurl_net_close(sock_fd);
         return -1;

@@ -8,6 +8,13 @@
 int nurl_net_connect(const char *hostname, int port);
 
 /**
+ * Connects to a host, optionally routing through an HTTP proxy.
+ * If proxying HTTPS, performs a CONNECT request to tunnel the traffic.
+ */
+int nurl_net_connect_proxy(const char *host, int port, const char *proxy, const char *proxy_user, const char *no_proxy);
+
+
+/**
  * Sets send and receive timeouts on the socket descriptor.
  * Returns 0 on success, or -1 on failure.
  */

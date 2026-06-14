@@ -9,8 +9,10 @@ typedef struct nurl_tls nurl_tls_t;
  * Initializes OpenSSL and returns a new nurl_tls_t context.
  * verify_certs: true to enforce certificate verification, false to ignore (--no-verify).
  * cacert_path: Path to custom root CA certificates, or NULL for system defaults.
+ * cert_path: Path to client certificate PEM file, or NULL.
+ * key_path: Path to client private key file, or NULL.
  */
-nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path);
+nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const char *cert_path, const char *key_path);
 
 /**
  * Performs a TLS handshake over the existing TCP socket.

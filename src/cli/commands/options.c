@@ -45,7 +45,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         return NURL_ERR_INVALID_URL;
     }
 
-    int sock_fd = nurl_net_connect(host, port);
+    int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
     if (sock_fd < 0) {
         fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
         free(scheme); free(host); free(path);
@@ -56,7 +56,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         nurl_net_set_timeout(sock_fd, common->timeout);
     }
 
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert);
+    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key);
     if (!tls) {
         fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
         nurl_net_close(sock_fd);

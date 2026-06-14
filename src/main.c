@@ -33,6 +33,11 @@ static void print_help(const char *prog_name) {
     printf("  -j, --json            Shorthand: sets Content-Type to application/json\n");
     printf("  -k, --no-verify       Skip TLS/SSL certificate verification\n");
     printf("  --cacert <file>       CA certificate PEM bundle path\n");
+    printf("  --cert <file>         TLS client certificate PEM file\n");
+    printf("  --key <file>          TLS private key file\n");
+    printf("  -x, --proxy <val>     HTTP proxy URL or host:port to tunnel requests\n");
+    printf("  --proxy-user <val>    Proxy authentication credentials (username:password)\n");
+    printf("  --no-proxy <val>      Comma-separated list of hosts to bypass proxy for\n");
     printf("  -t, --timeout <sec>   Maximum request timeout in seconds (default: 30)\n");
     printf("  -L, --location        Follow HTTP 3xx redirections\n");
     printf("  -H, --header <val>    Pass custom header line (e.g. \"X-Custom: value\")\n");

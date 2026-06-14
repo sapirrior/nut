@@ -10,7 +10,7 @@ struct nurl_tls {
     bool verify;
 };
 
-nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path) {
+nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const char *cert_path, const char *key_path) {
     // Initialize OpenSSL library
     static bool openssl_initialized = false;
     if (!openssl_initialized) {
@@ -48,6 +48,28 @@ nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path) {
         } else {
             // Load standard system paths
             SSL_CTX_set_default_verify_paths(tls->ctx);
+        }
+    }
+
+    // Configure client certificates if provided
+    if (cert_path) {
+        if (SSL_CTX_use_certificate_chain_file(tls->ctx, cert_path) != 1) {
+            SSL_CTX_free(tls->ctx);
+            free(tls);
+            return NULL;
+        }
+    }
+    if (key_path) {
+        if (SSL_CTX_use_PrivateKey_file(tls->ctx, key_path, SSL_FILETYPE_PEM) != 1) {
+            SSL_CTX_free(tls->ctx);
+            free(tls);
+            return NULL;
+        }
+        // Verify private key matches certificate
+        if (cert_path && SSL_CTX_check_private_key(tls->ctx) != 1) {
+            SSL_CTX_free(tls->ctx);
+            free(tls);
+            return NULL;
         }
     }
 
