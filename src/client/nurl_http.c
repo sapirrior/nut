@@ -85,12 +85,36 @@ nurl_http_response_t *nurl_http_request(
         return NULL;
     }
 
-    int written = snprintf(req_buf, req_capacity,
-        "%s %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "User-Agent: nurl/" NURL_VERSION "\r\n"
-        "Connection: close\r\n",
-        method, path, hostname);
+    bool has_user_agent = false;
+    if (extra_headers) {
+        const char *p = extra_headers;
+        while ((p = strcasestr(p, "User-Agent")) != NULL) {
+            if (p == extra_headers || p[-1] == '\n' || p[-1] == '\r') {
+                const char *colon = strchr(p, ':');
+                if (colon) {
+                    has_user_agent = true;
+                    break;
+                }
+            }
+            p++;
+        }
+    }
+
+    int written;
+    if (has_user_agent) {
+        written = snprintf(req_buf, req_capacity,
+            "%s %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "Connection: close\r\n",
+            method, path, hostname);
+    } else {
+        written = snprintf(req_buf, req_capacity,
+            "%s %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "User-Agent: nurl/" NURL_VERSION "\r\n"
+            "Connection: close\r\n",
+            method, path, hostname);
+    }
 
     if (body && body_len > 0) {
         written += snprintf(req_buf + written, req_capacity - written,

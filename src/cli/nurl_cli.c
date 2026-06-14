@@ -66,13 +66,14 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"proxy",           required_argument, NULL, 'x'},
         {"proxy-user",      required_argument, NULL, 16},
         {"no-proxy",        required_argument, NULL, 17},
+        {"user-agent",      required_argument, NULL, 'A'},
         {NULL, 0, NULL, 0}
     };
 
     int opt;
     opterr = 0; // Disable default getopt error printing
 
-    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'u':
                 if (args->user) free(args->user);
@@ -279,6 +280,14 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                     return -1;
                 }
                 break;
+            case 'A':
+                if (args->user_agent) free(args->user_agent);
+                args->user_agent = strdup(optarg);
+                if (!args->user_agent) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
             case 'V':
                 printf("nurl %s\n", NURL_VERSION);
                 exit(0);
@@ -351,6 +360,7 @@ void nurl_cli_free_args(CommonArgs *args) {
         free(args->proxy);
         free(args->proxy_user);
         free(args->no_proxy);
+        free(args->user_agent);
         if (args->upload_fields) {
             for (size_t i = 0; i < args->upload_fields_count; i++) {
                 free(args->upload_fields[i]);

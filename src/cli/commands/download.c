@@ -161,6 +161,14 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
         }
     }
 
+    if (!oom && common->user_agent) {
+        if (!has_header(common->header, common->header_count, "User-Agent")) {
+            if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "User-Agent: %s\r\n", common->user_agent)) {
+                oom = true;
+            }
+        }
+    }
+
     if (oom) {
         fprintf(stderr, "nurl: (1) Out of memory.\n");
         free(extra_hdr);

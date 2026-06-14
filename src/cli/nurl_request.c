@@ -298,6 +298,14 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             }
         }
 
+        if (!oom && common->user_agent) {
+            if (!has_header(common->header, common->header_count, "User-Agent")) {
+                if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "User-Agent: %s\r\n", common->user_agent)) {
+                    oom = true;
+                }
+            }
+        }
+
         // Load cookies and compile Cookie header
         if (!oom) {
             nurl_cookie_jar_t *loaded_jar = NULL;
