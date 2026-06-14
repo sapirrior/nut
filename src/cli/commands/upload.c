@@ -246,7 +246,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         fprintf(stderr, "* TLS handshake complete\n*\n");
         fprintf(stderr, "> POST %s HTTP/1.1\n", path);
         fprintf(stderr, "> Host: %s\n", host);
-        fprintf(stderr, "> User-Agent: nurl/0.1.1\n");
+        fprintf(stderr, "> User-Agent: nurl/" NURL_VERSION "\n");
         fprintf(stderr, "> Connection: close\n");
 
         char *hdr_copy = strdup(extra_hdr);

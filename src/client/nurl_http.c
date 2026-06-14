@@ -1,4 +1,8 @@
 #include "nurl_http.h"
+
+#ifndef NURL_VERSION
+#define NURL_VERSION "0.1.1"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,7 +88,7 @@ nurl_http_response_t *nurl_http_request(
     int written = snprintf(req_buf, req_capacity,
         "%s %s HTTP/1.1\r\n"
         "Host: %s\r\n"
-        "User-Agent: nurl/0.1.1\r\n"
+        "User-Agent: nurl/" NURL_VERSION "\r\n"
         "Connection: close\r\n",
         method, path, hostname);
 

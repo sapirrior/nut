@@ -59,6 +59,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"cookie-jar",      required_argument, NULL, 'c'},
         {"session",         required_argument, NULL, 13},
         {"write-out",       required_argument, NULL, 'w'},
+        {"version",         no_argument,       NULL, 'V'},
         {"help",            no_argument,       NULL, 'h'},
         {NULL, 0, NULL, 0}
     };
@@ -66,7 +67,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
     int opt;
     opterr = 0; // Disable default getopt error printing
 
-    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:V", long_options, NULL)) != -1) {
         switch (opt) {
             case 'u':
                 if (args->user) free(args->user);
@@ -233,17 +234,20 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                     return -1;
                 }
                 break;
+            case 'V':
+                printf("nurl %s\n", NURL_VERSION);
+                exit(0);
             case 'h':
                 return -1; // Help requested
             default:
-                fprintf(stderr, "Unknown option: %s\n", argv[optind - 1]);
+                fprintf(stderr, "nurl: option %s: is unknown\n", argv[optind - 1]);
                 return -1;
         }
     }
 
     int remaining = argc - optind;
     if (remaining <= 0) {
-        fprintf(stderr, "Error: Missing target URL.\n");
+        fprintf(stderr, "nurl: no URL specified!\n");
         return -1;
     }
 
@@ -256,7 +260,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                     *url = strdup(argv[optind + 1]);
                     args->upload_file = strdup(argv[optind + 2]);
                 } else {
-                    fprintf(stderr, "Error: Subcommand 'upload' requires target URL and local file path.\n");
+                    fprintf(stderr, "nurl: subcommand 'upload' requires target URL and local file path.\n");
                     free(*command);
                     *command = NULL;
                     return -1;
@@ -271,7 +275,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
     } else {
         const char *first = argv[optind];
         if (is_subcommand(first)) {
-            fprintf(stderr, "Error: Subcommand '%s' requires a target URL.\n", first);
+            fprintf(stderr, "nurl: subcommand '%s' requires a target URL.\n", first);
             return -1;
         } else {
             *command = strdup("get");

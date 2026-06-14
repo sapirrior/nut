@@ -392,7 +392,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             fprintf(stderr, "* TLS handshake complete\n*\n");
             fprintf(stderr, "> %s %s HTTP/1.1\n", method, path);
             fprintf(stderr, "> Host: %s\n", host);
-            fprintf(stderr, "> User-Agent: nurl/0.1.1\n");
+            fprintf(stderr, "> User-Agent: nurl/" NURL_VERSION "\n");
             fprintf(stderr, "> Connection: close\n");
 
             char *hdr_copy = strdup(extra_hdr);

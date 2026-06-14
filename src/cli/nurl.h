@@ -1,6 +1,10 @@
 #ifndef NURL_H
 #define NURL_H
 
+#ifndef NURL_VERSION
+#define NURL_VERSION "0.1.1"
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 

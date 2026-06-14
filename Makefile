@@ -1,5 +1,6 @@
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -O2 -Isrc/cli -Isrc/cli/commands -Isrc/client -Isrc/utils -D_GNU_SOURCE
+VERSION ?= 0.1.1
+CFLAGS = -std=c11 -Wall -Wextra -O2 -Isrc/cli -Isrc/cli/commands -Isrc/client -Isrc/utils -D_GNU_SOURCE -DNURL_VERSION=\"$(VERSION)\"
 LDFLAGS = /data/data/com.termux/files/usr/lib/libssl.a /data/data/com.termux/files/usr/lib/libcrypto.a -lpthread -ldl
 
 SRCS = src/client/nurl_net.c src/client/nurl_tls.c src/client/nurl_http.c \

@@ -30,7 +30,7 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     // Print Request Line and Host
     printf("> %s %s HTTP/1.1\n", common->method ? common->method : "GET", path);
     printf("> Host: %s\n", host);
-    printf("> User-Agent: nurl/0.1.1\n");
+    printf("> User-Agent: nurl/" NURL_VERSION "\n");
     printf("> Connection: close\n");
 
     // 1. User specified headers

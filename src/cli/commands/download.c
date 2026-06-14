@@ -184,7 +184,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     int written = snprintf(req_buf, req_capacity,
         "GET %s HTTP/1.1\r\n"
         "Host: %s\r\n"
-        "User-Agent: nurl/0.1.1\r\n"
+        "User-Agent: nurl/" NURL_VERSION "\r\n"
         "Connection: close\r\n%s\r\n",
         path, host, extra_hdr);
     free(extra_hdr);
