@@ -1,5 +1,6 @@
 #include "nurl_request.h"
 #include "nurl_engine.h"
+#include "request.h"
 #include "nurl_utils.h"
 #include <sys/time.h>
 #include <stdio.h>
@@ -123,6 +124,10 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
     nurl_http_response_t *res = NULL;
     char *effective_url = NULL;
 
+    NurlRequest *req = nurl_request_new();
+    if (!req) return NURL_ERR_OOM;
+    nurl_request_from_args(req, method, url, (const BaseArgs *)common);
+
     unsigned int max_retries = common->retry;
     unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;
     int engine_err = NURL_OK;
@@ -137,7 +142,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             effective_url = NULL;
         }
 
-        engine_err = nurl_engine_execute_request(method, url, common, &res, &effective_url);
+        engine_err = nurl_engine_execute_request(req, &res, &effective_url);
 
         if (engine_err == NURL_OK && res) {
             if (res->status_code < 500) {
@@ -160,6 +165,8 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             sleep(delay_sec);
         }
     }
+
+    nurl_request_free(req);
 
     if (engine_err != NURL_OK) {
         if (effective_url) free(effective_url);

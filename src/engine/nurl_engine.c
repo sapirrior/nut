@@ -14,17 +14,14 @@
 #include <unistd.h>
 #include <ctype.h>
 
-
 int nurl_engine_execute_request(
-    const char *method,
-    const char *url,
-    const CommonArgs *common,
+    NurlRequest *req,
     nurl_http_response_t **out_response,
     char **out_effective_url
 ) {
-    char *current_url = strdup(url);
+    char *current_url = strdup(req->url);
     int redirects_followed = 0;
-    const int max_redirects = common->max_redirects > 0 ? common->max_redirects : 5;
+    const int max_redirects = req->max_redirects > 0 ? req->max_redirects : 5;
 
     nurl_http_response_t *res = NULL;
 
@@ -47,18 +44,18 @@ int nurl_engine_execute_request(
             return NURL_ERR_TLS;
         }
 
-        int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
+        int sock_fd = nurl_net_connect_proxy(host, port, req->proxy, req->proxy_user, req->no_proxy);
         if (sock_fd < 0) {
             fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_NETWORK;
         }
 
-        if (common->timeout > 0) {
-            nurl_net_set_timeout(sock_fd, common->timeout);
+        if (req->timeout_sec > 0) {
+            nurl_net_set_timeout(sock_fd, req->timeout_sec);
         }
 
-        nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
+        nurl_tls_t *tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
         if (!tls) {
             fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
             nurl_net_close(sock_fd);
@@ -74,174 +71,101 @@ int nurl_engine_execute_request(
             return NURL_ERR_TLS;
         }
 
-        size_t extra_hdr_capacity = 1024;
-        char *extra_hdr = malloc(extra_hdr_capacity);
-        if (!extra_hdr) {
-            fprintf(stderr, "Error: Out of memory.\n");
+        NurlHeaderList *temp_hdrs = nurl_headers_new();
+        if (!temp_hdrs) {
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
             free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_GENERIC;
+            return NURL_ERR_OOM;
         }
-        extra_hdr[0] = '\0';
-        size_t extra_hdr_len = 0;
-        bool oom = false;
 
-        for (size_t i = 0; i < common->header_count; i++) {
-            if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "%s\r\n", common->header[i])) {
-                oom = true;
-                break;
+        // Copy base headers
+        for (size_t i = 0; i < req->headers->count; i++) {
+            nurl_headers_add_raw(temp_hdrs, req->headers->entries[i]);
+        }
+
+        // Dynamic Cookie compilation
+        nurl_cookie_jar_t *loaded_jar = NULL;
+        bool jar_loaded = false;
+
+        if (req->cookie) {
+            if (req->cookie[0] == '@') {
+                loaded_jar = nurl_cookie_jar_load(req->cookie + 1);
+                if (loaded_jar) jar_loaded = true;
             }
         }
 
-        if (!oom && !common->no_auth) {
-            if (common->bearer || common->token) {
-                const char *tok = common->bearer ? common->bearer : common->token;
-                if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
-                    if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Authorization: Bearer %s\r\n", tok)) {
-                        oom = true;
+        if (req->session) {
+            nurl_cookie_jar_t *s_jar = nurl_cookie_jar_load(req->session);
+            if (s_jar) {
+                if (jar_loaded) {
+                    for (size_t i = 0; i < s_jar->count; i++) {
+                        nurl_cookie_jar_add(loaded_jar, &s_jar->cookies[i]);
                     }
-                }
-            } else if (common->user) {
-                if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
-                    char *b64 = nurl_utils_base64_encode((const unsigned char *)common->user, strlen(common->user));
-                    if (b64) {
-                        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Authorization: Basic %s\r\n", b64)) {
-                            oom = true;
-                        }
-                        free(b64);
-                    } else {
-                        oom = true;
-                    }
+                    nurl_cookie_jar_free(s_jar);
+                } else {
+                    loaded_jar = s_jar;
+                    jar_loaded = true;
                 }
             }
         }
 
-        if (!oom && common->json && !nurl_utils_has_header(common->header, common->header_count, "Content-Type")) {
-            if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "%s", "Content-Type: application/json\r\n")) {
-                oom = true;
-            }
+        char *cookie_hdr = NULL;
+        size_t cookie_hdr_len = 0;
+        size_t cookie_hdr_cap = 0;
+
+        if (req->cookie && req->cookie[0] != '@') {
+            cookie_hdr_len = strlen(req->cookie);
+            cookie_hdr_cap = cookie_hdr_len + 256;
+            cookie_hdr = malloc(cookie_hdr_cap);
+            if (cookie_hdr) strcpy(cookie_hdr, req->cookie);
         }
 
-        if (!oom && common->user_agent) {
-            if (!nurl_utils_has_header(common->header, common->header_count, "User-Agent")) {
-                if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "User-Agent: %s\r\n", common->user_agent)) {
-                    oom = true;
+        if (jar_loaded && loaded_jar) {
+            for (size_t i = 0; i < loaded_jar->count; i++) {
+                nurl_cookie_t *c = &loaded_jar->cookies[i];
+                size_t needed = strlen(c->name) + strlen(c->value) + 4;
+                if (cookie_hdr_len + needed >= cookie_hdr_cap) {
+                    cookie_hdr_cap = (cookie_hdr_cap + needed) * 2;
+                    char *temp = realloc(cookie_hdr, cookie_hdr_cap);
+                    if (temp) cookie_hdr = temp;
                 }
-            }
-        }
-
-        if (!oom && common->referer) {
-            if (!nurl_utils_has_header(common->header, common->header_count, "Referer")) {
-                if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Referer: %s\r\n", common->referer)) {
-                    oom = true;
-                }
-            }
-        }
-
-        if (!oom && common->compressed) {
-            if (!nurl_utils_has_header(common->header, common->header_count, "Accept-Encoding")) {
-                if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "%s", "Accept-Encoding: gzip, deflate\r\n")) {
-                    oom = true;
-                }
-            }
-        }
-
-        // Load cookies and compile Cookie header
-        if (!oom) {
-            nurl_cookie_jar_t *loaded_jar = NULL;
-            bool jar_loaded = false;
-
-            if (common->cookie) {
-                if (common->cookie[0] == '@') {
-                    loaded_jar = nurl_cookie_jar_load(common->cookie + 1);
-                    if (loaded_jar) {
-                        jar_loaded = true;
-                    }
-                }
-            }
-
-            if (common->session) {
-                nurl_cookie_jar_t *s_jar = nurl_cookie_jar_load(common->session);
-                if (s_jar) {
-                    if (jar_loaded) {
-                        // Merge s_jar into loaded_jar
-                        for (size_t i = 0; i < s_jar->count; i++) {
-                            nurl_cookie_jar_add(loaded_jar, &s_jar->cookies[i]);
-                        }
-                        nurl_cookie_jar_free(s_jar);
-                    } else {
-                        loaded_jar = s_jar;
-                        jar_loaded = true;
-                    }
-                }
-            }
-
-            char *cookie_hdr = NULL;
-            size_t cookie_hdr_len = 0;
-            size_t cookie_hdr_cap = 0;
-
-            if (common->cookie && common->cookie[0] != '@') {
-                cookie_hdr_len = strlen(common->cookie);
-                cookie_hdr_cap = cookie_hdr_len + 256;
-                cookie_hdr = malloc(cookie_hdr_cap);
                 if (cookie_hdr) {
-                    strcpy(cookie_hdr, common->cookie);
-                }
-            }
-
-            if (jar_loaded && loaded_jar) {
-                for (size_t i = 0; i < loaded_jar->count; i++) {
-                    nurl_cookie_t *c = &loaded_jar->cookies[i];
-                    size_t needed = strlen(c->name) + strlen(c->value) + 4;
-                    if (cookie_hdr_len + needed >= cookie_hdr_cap) {
-                        cookie_hdr_cap = (cookie_hdr_cap + needed) * 2;
-                        char *temp = realloc(cookie_hdr, cookie_hdr_cap);
-                        if (temp) {
-                            cookie_hdr = temp;
-                        }
+                    if (cookie_hdr_len > 0) {
+                        strcat(cookie_hdr, "; ");
+                        cookie_hdr_len += 2;
                     }
-                    if (cookie_hdr) {
-                        if (cookie_hdr_len > 0) {
-                            strcat(cookie_hdr, "; ");
-                            cookie_hdr_len += 2;
-                        }
-                        strcat(cookie_hdr, c->name);
-                        strcat(cookie_hdr, "=");
-                        strcat(cookie_hdr, c->value);
-                        cookie_hdr_len += strlen(c->name) + 1 + strlen(c->value);
-                    }
+                    strcat(cookie_hdr, c->name);
+                    strcat(cookie_hdr, "=");
+                    strcat(cookie_hdr, c->value);
+                    cookie_hdr_len += strlen(c->name) + 1 + strlen(c->value);
                 }
-            }
-
-            if (cookie_hdr && cookie_hdr_len > 0) {
-                if (!nurl_utils_has_header(common->header, common->header_count, "Cookie")) {
-                    if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Cookie: %s\r\n", cookie_hdr)) {
-                        oom = true;
-                    }
-                }
-            }
-            free(cookie_hdr);
-            if (loaded_jar) {
-                nurl_cookie_jar_free(loaded_jar);
             }
         }
 
-        if (oom) {
-            fprintf(stderr, "nurl: (1) Out of memory preparing headers.\n");
-            free(extra_hdr);
+        if (cookie_hdr && cookie_hdr_len > 0) {
+            if (!nurl_headers_has(temp_hdrs, "Cookie")) {
+                nurl_headers_add(temp_hdrs, "Cookie", cookie_hdr);
+            }
+        }
+        free(cookie_hdr);
+        if (loaded_jar) nurl_cookie_jar_free(loaded_jar);
+
+        char *extra_hdr = nurl_headers_serialize(temp_hdrs);
+        nurl_headers_free(temp_hdrs);
+
+        if (!extra_hdr) {
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
             free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_GENERIC;
+            return NURL_ERR_OOM;
         }
 
-        if (common->verbose && !common->silent) {
+        if (req->verbose && !req->silent) {
             fprintf(stderr, "* Connected to %s port %d\n", host, port);
             fprintf(stderr, "* TLS handshake complete\n*\n");
-            fprintf(stderr, "> %s %s HTTP/1.1\n", method, path);
+            fprintf(stderr, "> %s %s HTTP/1.1\n", req->method, path);
             fprintf(stderr, "> Host: %s\n", host);
-            fprintf(stderr, "> User-Agent: nurl/" NURL_VERSION "\n");
             fprintf(stderr, "> Connection: close\n");
 
             char *hdr_copy = strdup(extra_hdr);
@@ -262,13 +186,7 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        const unsigned char *body_data = (const unsigned char *)common->data;
-        size_t body_len = 0;
-        if (common->data) {
-            body_len = common->data_len > 0 ? common->data_len : strlen(common->data);
-        }
-
-        res = nurl_http_request(tls, method, path, host, extra_hdr, body_data, body_len);
+        res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len);
         free(extra_hdr);
 
         if (!res) {
@@ -279,8 +197,8 @@ int nurl_engine_execute_request(
             return NURL_ERR_NETWORK;
         }
 
-        // Handle decompresion if Accept-Encoding was requested
-        if (common->compressed && res && res->body_len > 0) {
+        // Handle decompression if Accept-Encoding was requested
+        if (req->decompress && res && res->body_len > 0) {
             bool is_compressed = false;
             for (size_t i = 0; i < res->header_count; i++) {
                 if (strncasecmp(res->headers[i], "Content-Encoding:", 17) == 0) {
@@ -308,7 +226,7 @@ int nurl_engine_execute_request(
         }
 
         // Extract Set-Cookie headers and save to jar
-        const char *save_path = common->cookie_jar ? common->cookie_jar : common->session;
+        const char *save_path = req->cookie_jar ? req->cookie_jar : req->session;
         if (save_path && res) {
             nurl_cookie_jar_t *save_jar = nurl_cookie_jar_load(save_path);
             if (!save_jar) {
@@ -396,7 +314,7 @@ int nurl_engine_execute_request(
             }
         }
 
-        if (common->verbose && !common->silent) {
+        if (req->verbose && !req->silent) {
             fprintf(stderr, "< HTTP/1.1 %d %s\n", res->status_code, res->status_text);
             for (size_t i = 0; i < res->header_count; i++) {
                 fprintf(stderr, "< %s\n", res->headers[i]);
@@ -404,7 +322,7 @@ int nurl_engine_execute_request(
             fprintf(stderr, "< \n");
         }
 
-        if (common->location && res->status_code >= 300 && res->status_code < 400) {
+        if (req->follow_redirect && res->status_code >= 300 && res->status_code < 400) {
             char *redir_url = NULL;
             for (size_t i = 0; i < res->header_count; i++) {
                 if (strncasecmp(res->headers[i], "Location:", 9) == 0) {
