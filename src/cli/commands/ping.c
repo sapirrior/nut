@@ -82,18 +82,19 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
 
         while (1) {
             gettimeofday(&start, NULL);
-            res = nurl_http_request(tls, "HEAD", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0);
+            nurl_err_t err = nurl_http_request(tls, "HEAD", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0, &res);
             gettimeofday(&end, NULL);
 
-            if (res && res->status_code == 405) {
+            if (err == NURL_OK && res && res->status_code == 405) {
                 // Method not allowed, retry with GET
                 nurl_http_response_free(res);
+                res = NULL;
                 gettimeofday(&start, NULL);
-                res = nurl_http_request(tls, "GET", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0);
+                err = nurl_http_request(tls, "GET", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0, &res);
                 gettimeofday(&end, NULL);
             }
 
-            if (!res) {
+            if (err != NURL_OK) {
                 // Connection might have been closed by server (keep-alive timeout). Try to reconnect once.
                 if (!reconnected) {
                     nurl_tls_free(tls);

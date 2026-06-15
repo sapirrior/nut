@@ -13,6 +13,8 @@ typedef struct {
     size_t body_len;
 } nurl_http_response_t;
 
+#include "engine/utils/nurl_error.h"
+
 /**
  * Sends a structured HTTP/1.1 request via the provided active TLS channel.
  * method: "GET", "POST", etc.
@@ -21,12 +23,13 @@ typedef struct {
  * extra_headers: Null-terminated string containing extra "Name: Value\r\n" headers, or NULL.
  * body: Payload bytes, or NULL.
  * body_len: Length of payload in bytes.
- * Returns a dynamically allocated nurl_http_response_t pointer on success, or NULL on error.
+ * Returns NURL_OK on success, or an explicit nurl_err_t on failure.
+ * If successful, *out_response will contain the dynamically allocated response.
  */
 #include "engine/request.h"
 #include <stdio.h>
 
-nurl_http_response_t *nurl_http_request(
+nurl_err_t nurl_http_request(
     nurl_tls_t *tls,
     const char *method,
     const char *path,
@@ -39,7 +42,8 @@ nurl_http_response_t *nurl_http_request(
     FILE *body_out,
     bool show_progress,
     bool silent,
-    unsigned long resume_offset
+    unsigned long resume_offset,
+    nurl_http_response_t **out_response
 );
 
 /**

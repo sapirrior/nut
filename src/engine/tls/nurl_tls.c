@@ -35,8 +35,8 @@ nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const ch
         return NULL;
     }
 
-    // Offer HTTP/2 (h2) and HTTP/1.1 (http/1.1) protocols
-    static const unsigned char alpn_protos[] = "\x02h2\x08http/1.1";
+    // Offer HTTP/1.1 (http/1.1) protocol
+    static const unsigned char alpn_protos[] = "\x08http/1.1";
     SSL_CTX_set_alpn_protos(tls->ctx, alpn_protos, sizeof(alpn_protos) - 1);
 
     // Enforce TLS versions if requested

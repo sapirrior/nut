@@ -65,7 +65,7 @@ static int tls_read_line(nurl_tls_t *tls, char *buf, size_t max_len) {
     return (int)len;
 }
 
-nurl_http_response_t *nurl_http_request(
+nurl_err_t nurl_http_request(
     nurl_tls_t *tls,
     const char *method,
     const char *path,
@@ -78,8 +78,11 @@ nurl_http_response_t *nurl_http_request(
     FILE *body_out,
     bool show_progress,
     bool silent,
-    unsigned long resume_offset
+    unsigned long resume_offset,
+    nurl_http_response_t **out_response
 ) {
+    if (out_response) *out_response = NULL;
+
     size_t total_body_len = body_len;
     if (body_parts && body_parts_count > 0) {
         total_body_len = 0;
@@ -99,7 +102,7 @@ nurl_http_response_t *nurl_http_request(
     size_t req_capacity = 4096 + (extra_headers ? strlen(extra_headers) : 0);
     char *req_buf = malloc(req_capacity);
     if (!req_buf) {
-        return NULL;
+        return NURL_ERR_OOM;
     }
 
     bool has_user_agent = false;
@@ -153,7 +156,7 @@ nurl_http_response_t *nurl_http_request(
     // Send HTTP Headers
     if (nurl_tls_write(tls, req_buf, written) <= 0) {
         free(req_buf);
-        return NULL;
+        return NURL_ERR_NETWORK;
     }
     free(req_buf);
 
@@ -164,21 +167,21 @@ nurl_http_response_t *nurl_http_request(
             if (part->type == NURL_BODY_PART_MEM) {
                 if (part->data && part->len > 0) {
                     if (nurl_tls_write(tls, part->data, part->len) <= 0) {
-                        return NULL;
+                        return NURL_ERR_NETWORK;
                     }
                 }
             } else if (part->type == NURL_BODY_PART_FILE) {
                 if (part->filepath) {
                     FILE *bf = fopen(part->filepath, "rb");
                     if (!bf) {
-                        return NULL;
+                        return NURL_ERR_IO;
                     }
                     char send_buf[65536];
                     size_t r;
                     while ((r = fread(send_buf, 1, sizeof(send_buf), bf)) > 0) {
                         if (nurl_tls_write(tls, (const unsigned char *)send_buf, r) <= 0) {
                             fclose(bf);
-                            return NULL;
+                            return NURL_ERR_NETWORK;
                         }
                     }
                     fclose(bf);
@@ -187,7 +190,7 @@ nurl_http_response_t *nurl_http_request(
         }
     } else if (body && body_len > 0) {
         if (nurl_tls_write(tls, body, body_len) <= 0) {
-            return NULL;
+            return NURL_ERR_NETWORK;
         }
     }
 
@@ -196,7 +199,7 @@ nurl_http_response_t *nurl_http_request(
     size_t header_length = 0;
     char *headers_buf = malloc(header_capacity);
     if (!headers_buf) {
-        return NULL;
+        return NURL_ERR_OOM;
     }
 
     bool found_boundary = false;
@@ -221,13 +224,13 @@ nurl_http_response_t *nurl_http_request(
 
     if (!found_boundary) {
         free(headers_buf);
-        return NULL;
+        return NURL_ERR_NETWORK;
     }
 
     nurl_http_response_t *res = calloc(1, sizeof(nurl_http_response_t));
     if (!res) {
         free(headers_buf);
-        return NULL;
+        return NURL_ERR_OOM;
     }
 
     // Split headers string into lines
@@ -237,7 +240,7 @@ nurl_http_response_t *nurl_http_request(
     if (!line) {
         nurl_http_response_free(res);
         free(headers_buf);
-        return NULL;
+        return NURL_ERR_NETWORK;
     }
 
     // Parse status line: e.g. "HTTP/1.1 200 OK"
@@ -260,7 +263,7 @@ nurl_http_response_t *nurl_http_request(
     if (!res->status_text) {
         nurl_http_response_free(res);
         free(headers_buf);
-        return NULL;
+        return NURL_ERR_OOM;
     }
 
     // Parse all other header lines
@@ -273,14 +276,14 @@ nurl_http_response_t *nurl_http_request(
         if (!temp) {
             nurl_http_response_free(res);
             free(headers_buf);
-            return NULL;
+            return NURL_ERR_OOM;
         }
         res->headers = temp;
         res->headers[res->header_count] = strdup(line);
         if (!res->headers[res->header_count]) {
             nurl_http_response_free(res);
             free(headers_buf);
-            return NULL;
+            return NURL_ERR_OOM;
         }
         res->header_count++;
 
@@ -307,7 +310,8 @@ nurl_http_response_t *nurl_http_request(
     free(headers_buf);
 
     if (strcasecmp(method, "HEAD") == 0) {
-        return res;
+        if (out_response) *out_response = res;
+        return NURL_OK;
     }
 
     unsigned long total_len_computed = total_len;
@@ -330,7 +334,7 @@ nurl_http_response_t *nurl_http_request(
             body_buf = malloc(body_cap);
             if (!body_buf) {
                 nurl_http_response_free(res);
-                return NULL;
+                return NURL_ERR_OOM;
             }
         }
 
@@ -358,7 +362,7 @@ nurl_http_response_t *nurl_http_request(
                 if (n <= 0) {
                     if (body_buf) free(body_buf);
                     nurl_http_response_free(res);
-                    return NULL;
+                    return NURL_ERR_NETWORK;
                 }
 
                 if (body_out) {
@@ -370,7 +374,7 @@ nurl_http_response_t *nurl_http_request(
                         if (!temp) {
                             free(body_buf);
                             nurl_http_response_free(res);
-                            return NULL;
+                            return NURL_ERR_OOM;
                         }
                         body_buf = temp;
                     }
@@ -399,7 +403,7 @@ nurl_http_response_t *nurl_http_request(
             body_buf = malloc(content_len + 1);
             if (!body_buf) {
                 nurl_http_response_free(res);
-                return NULL;
+                return NURL_ERR_OOM;
             }
         }
 
@@ -434,7 +438,7 @@ nurl_http_response_t *nurl_http_request(
             body_buf = malloc(body_cap);
             if (!body_buf) {
                 nurl_http_response_free(res);
-                return NULL;
+                return NURL_ERR_OOM;
             }
         }
 
@@ -450,7 +454,7 @@ nurl_http_response_t *nurl_http_request(
                     if (!temp) {
                         free(body_buf);
                         nurl_http_response_free(res);
-                        return NULL;
+                        return NURL_ERR_OOM;
                     }
                     body_buf = temp;
                 }
@@ -472,7 +476,8 @@ nurl_http_response_t *nurl_http_request(
         fprintf(stderr, "\n");
     }
 
-    return res;
+    if (out_response) *out_response = res;
+    return NURL_OK;
 }
 
 void nurl_http_response_free(nurl_http_response_t *res) {

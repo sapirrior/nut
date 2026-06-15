@@ -170,8 +170,6 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"request",         required_argument, NULL, 'X'},
         {"upload",          required_argument, NULL, 23},
         {"http1.1",         no_argument,       NULL, 24},
-        {"http2",           no_argument,       NULL, 25},
-        {"http3",           no_argument,       NULL, 26},
         {NULL, 0, NULL, 0}
     };
 
@@ -467,12 +465,6 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 break;
             case 24:
                 args->http11 = true;
-                break;
-            case 25:
-                args->http2 = true;
-                break;
-            case 26:
-                args->http3 = true;
                 break;
             case 'V':
                 printf("nurl %s\n", NURL_VERSION);

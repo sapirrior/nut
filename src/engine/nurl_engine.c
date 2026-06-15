@@ -4,8 +4,6 @@
 #include "nurl_pool.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
-#include "nurl_http2.h"
-#include "nurl_http3.h"
 #include "nurl_cookies.h"
 #include "nurl_decompress.h"
 #include "nurl_redirect.h"
@@ -62,19 +60,6 @@ int nurl_engine_execute_request(
             fprintf(stderr, "nurl: (5) nurl currently only supports HTTPS (TLS) requests.\n");
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_TLS;
-        }
-
-        if (req->http3) {
-            if (req->verbose && !req->silent) {
-                fprintf(stderr, "* Connecting to %s:%d via UDP for HTTP/3\n", host, port);
-            }
-            res = nurl_http3_request(req->method, path, host, port, NULL, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset, req->tls_verify, req->cacert, req->cert, req->key);
-            if (!res) {
-                fprintf(stderr, "nurl: (2) HTTP/3 request failed.\n");
-                free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_NETWORK;
-            }
-            break; // Skip rest of HTTP/1.1 or HTTP/2 loop since request is done
         }
 
         int sock_fd = -1;
@@ -215,11 +200,9 @@ int nurl_engine_execute_request(
         if (req->verbose && !req->silent) {
             fprintf(stderr, "* Connected to %s port %d\n", host, port);
             fprintf(stderr, "* TLS handshake complete (ALPN: %s)\n*\n", proto ? proto : "none");
-            fprintf(stderr, "> %s %s %s\n", req->method, path, (proto && strcmp(proto, "h2") == 0) ? "HTTP/2" : "HTTP/1.1");
+            fprintf(stderr, "> %s %s HTTP/1.1\n", req->method, path);
             fprintf(stderr, "> Host: %s\n", host);
-            if (!proto || strcmp(proto, "h2") != 0) {
-                fprintf(stderr, "> Connection: close\n");
-            }
+            fprintf(stderr, "> Connection: close\n");
 
             char *hdr_copy = strdup(extra_hdr);
             char *line = strtok(hdr_copy, "\r\n");
@@ -239,15 +222,20 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        if (proto && strcmp(proto, "h2") == 0) {
-            res = nurl_http2_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset);
-        } else {
-            res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset);
-        }
+        nurl_err_t exec_err = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset, &res);
         free(extra_hdr);
 
-        if (!res) {
-            fprintf(stderr, "nurl: (2) HTTP request failed or timed out.\n");
+        if (exec_err != NURL_OK) {
+            if (exec_err == NURL_ERR_NETWORK) {
+                fprintf(stderr, "nurl: (%d) Network connection reset or interrupted.\n", exec_err);
+            } else if (exec_err == NURL_ERR_OOM) {
+                fprintf(stderr, "nurl: (%d) Out of memory during request processing.\n", exec_err);
+            } else if (exec_err == NURL_ERR_IO) {
+                fprintf(stderr, "nurl: (%d) Local I/O error reading body payload.\n", exec_err);
+            } else {
+                fprintf(stderr, "nurl: (%d) HTTP request failed.\n", exec_err);
+            }
+
             if (req->pool) {
                 nurl_pool_evict(req->pool, sock_fd);
             } else {
@@ -255,7 +243,7 @@ int nurl_engine_execute_request(
                 nurl_net_close(sock_fd);
             }
             free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_NETWORK;
+            return exec_err;
         }
 
         // Handle decompression if Accept-Encoding was requested

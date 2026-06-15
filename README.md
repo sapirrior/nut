@@ -40,10 +40,11 @@ make
 ```
 
 ### Build Size & Portability Features
-The [Makefile](file:///data/data/com.termux/files/home/works/nurl/Makefile) is tuned for production-grade builds:
+The [Makefile](Makefile) is tuned for production-grade builds:
 *   **Static Linking**: Links `libssl` and `libcrypto` statically (`-Wl,-Bstatic -lssl -lcrypto`), producing an executable with zero external OpenSSL dependencies.
 *   **Size Optimization**: Compiled with `-Os` (size optimization), `-ffunction-sections`, and `-fdata-sections`.
-*   **Dead Code Elimination**: The linker removes unused functions at link time via `-Wl,--gc-sections -s`, stripping all symbols to keep the final executable size compact (~5.0MB total, including OpenSSL).
+*   **Zero Bloat**: By removing HTTP/2 and HTTP/3 framing libraries, the final binary remains lean and focused.
+*   **Dead Code Elimination**: The linker removes unused functions at link time via `-Wl,--gc-sections -s`, stripping all symbols to keep the final executable size compact (~2.5MB total, including OpenSSL).
 
 ---
 
@@ -148,13 +149,13 @@ nurl resolve httpbin.org
 
 ## 5. Protocol Support
 
-`nurl` supports modern HTTP protocol versions out of the box, with ALPN-negotiated fallbacks:
-*   **HTTP/1.1**: Default fallback protocol.
-*   **HTTP/2**: Integrated multiplexed engine via `nghttp2` (negotiated automatically via ALPN).
-*   **HTTP/3 (QUIC)**: Supported via `--http3` flag (built on the `ngtcp2` + `nghttp3` frame layout). To force HTTP/3:
-    ```bash
-    nurl get https://nghttp2.org/httpbin/headers --http3 -v
-    ```
+`nurl` is built as an exclusive, highly-optimized **HTTP/1.1** client. 
+
+By focusing on a rock-solid, manual implementation of the HTTP/1.1 state machine, `nurl` ensures maximum predictability and speed for CLI-based transfers without the overhead and complexity of binary framing libraries. 
+
+*   **HTTP/1.1**: The core engine, supporting keep-alive, chunked transfers, and byte-range resumes.
+*   **TLS 1.2/1.3**: Fully supported via OpenSSL with automatic ALPN negotiation for `http/1.1`.
+
 
 ---
 

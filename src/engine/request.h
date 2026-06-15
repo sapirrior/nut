@@ -74,7 +74,6 @@ typedef struct {
     const char      *upload_file;
 
     NurlConnPool *pool;
-    bool          http3;
 } NurlRequest;
 
 NurlRequest *nurl_request_new(void);

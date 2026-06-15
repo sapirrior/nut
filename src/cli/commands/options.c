@@ -159,15 +159,22 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         fprintf(stderr, "> \n");
     }
 
-    nurl_http_response_t *res = nurl_http_request(tls, "OPTIONS", path, host, extra_hdr, NULL, 0, NULL, 0, NULL, false, true, 0);
+    nurl_http_response_t *res = NULL;
+    nurl_err_t exec_err = nurl_http_request(tls, "OPTIONS", path, host, extra_hdr, NULL, 0, NULL, 0, NULL, false, true, 0, &res);
     free(extra_hdr);
 
-    if (!res) {
-        fprintf(stderr, "nurl: (2) HTTP OPTIONS request failed.\n");
+    if (exec_err != NURL_OK) {
+        if (exec_err == NURL_ERR_NETWORK) {
+            fprintf(stderr, "nurl: (%d) Network connection reset or interrupted during OPTIONS request.\n", exec_err);
+        } else if (exec_err == NURL_ERR_OOM) {
+            fprintf(stderr, "nurl: (%d) Out of memory during OPTIONS request.\n", exec_err);
+        } else {
+            fprintf(stderr, "nurl: (%d) HTTP OPTIONS request failed.\n", exec_err);
+        }
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
-        return NURL_ERR_NETWORK;
+        return exec_err;
     }
 
     if (common->verbose && !common->silent) {
