@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdio.h>
 
+typedef struct NurlConnPool NurlConnPool;
+
 typedef enum {
     NURL_BODY_PART_MEM,
     NURL_BODY_PART_FILE
@@ -70,6 +72,8 @@ typedef struct {
 
     /* Upload-specific */
     const char      *upload_file;
+
+    NurlConnPool *pool;
 } NurlRequest;
 
 NurlRequest *nurl_request_new(void);

@@ -1,6 +1,7 @@
 #include "nurl_engine.h"
 #include "nurl_net.h"
 #include "nurl_tls.h"
+#include "nurl_pool.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
 #include "nurl_cookies.h"
@@ -14,11 +15,28 @@
 #include <unistd.h>
 #include <ctype.h>
 
+static NurlConnPool *global_pool = NULL;
+
+static void cleanup_global_pool(void) {
+    if (global_pool) {
+        nurl_pool_destroy(global_pool);
+        global_pool = NULL;
+    }
+}
+
 int nurl_engine_execute_request(
     NurlRequest *req,
     nurl_http_response_t **out_response,
     char **out_effective_url
 ) {
+    if (!global_pool) {
+        global_pool = nurl_pool_create();
+        if (global_pool) {
+            atexit(cleanup_global_pool);
+        }
+    }
+    req->pool = global_pool;
+
     char *current_url = strdup(req->url);
     int redirects_followed = 0;
     const int max_redirects = req->max_redirects > 0 ? req->max_redirects : 5;
@@ -44,31 +62,42 @@ int nurl_engine_execute_request(
             return NURL_ERR_TLS;
         }
 
-        int sock_fd = nurl_net_connect_proxy(host, port, req->proxy, req->proxy_user, req->no_proxy);
-        if (sock_fd < 0) {
-            fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
-            free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_NETWORK;
-        }
+        int sock_fd = -1;
+        nurl_tls_t *tls = NULL;
 
-        if (req->timeout_sec > 0) {
-            nurl_net_set_timeout(sock_fd, req->timeout_sec);
-        }
+        if (req->pool) {
+            if (nurl_pool_acquire(req->pool, host, port, req, &sock_fd, &tls) != 0) {
+                fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
+                free(scheme); free(host); free(path); free(current_url);
+                return NURL_ERR_NETWORK;
+            }
+        } else {
+            sock_fd = nurl_net_connect_proxy(host, port, req->proxy, req->proxy_user, req->no_proxy);
+            if (sock_fd < 0) {
+                fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
+                free(scheme); free(host); free(path); free(current_url);
+                return NURL_ERR_NETWORK;
+            }
 
-        nurl_tls_t *tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
-        if (!tls) {
-            fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
-            nurl_net_close(sock_fd);
-            free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_TLS;
-        }
+            if (req->timeout_sec > 0) {
+                nurl_net_set_timeout(sock_fd, req->timeout_sec);
+            }
 
-        if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-            fprintf(stderr, "nurl: (5) TLS verification failed.\n");
-            nurl_tls_free(tls);
-            nurl_net_close(sock_fd);
-            free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_TLS;
+            tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
+            if (!tls) {
+                fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
+                nurl_net_close(sock_fd);
+                free(scheme); free(host); free(path); free(current_url);
+                return NURL_ERR_TLS;
+            }
+
+            if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
+                fprintf(stderr, "nurl: (5) TLS verification failed.\n");
+                nurl_tls_free(tls);
+                nurl_net_close(sock_fd);
+                free(scheme); free(host); free(path); free(current_url);
+                return NURL_ERR_TLS;
+            }
         }
 
         NurlHeaderList *temp_hdrs = nurl_headers_new();
@@ -197,8 +226,12 @@ int nurl_engine_execute_request(
 
         if (!res) {
             fprintf(stderr, "nurl: (2) HTTP request failed or timed out.\n");
-            nurl_tls_free(tls);
-            nurl_net_close(sock_fd);
+            if (req->pool) {
+                nurl_pool_evict(req->pool, sock_fd);
+            } else {
+                nurl_tls_free(tls);
+                nurl_net_close(sock_fd);
+            }
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_NETWORK;
         }
@@ -341,8 +374,12 @@ int nurl_engine_execute_request(
 
             if (redir_url) {
                 nurl_http_response_free(res);
-                nurl_tls_free(tls);
-                nurl_net_close(sock_fd);
+                if (req->pool) {
+                    nurl_pool_release(req->pool, host, port, sock_fd, tls);
+                } else {
+                    nurl_tls_free(tls);
+                    nurl_net_close(sock_fd);
+                }
                 free(scheme); free(host); free(path);
 
                 free(current_url);
@@ -358,8 +395,31 @@ int nurl_engine_execute_request(
             }
         }
 
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
+        if (req->pool) {
+            bool keep_alive = true;
+            if (res) {
+                for (size_t i = 0; i < res->header_count; i++) {
+                    if (strncasecmp(res->headers[i], "Connection:", 11) == 0) {
+                        char *val = res->headers[i] + 11;
+                        while (*val && isspace((unsigned char)*val)) val++;
+                        if (strcasecmp(val, "close") == 0) {
+                            keep_alive = false;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                keep_alive = false;
+            }
+            if (keep_alive) {
+                nurl_pool_release(req->pool, host, port, sock_fd, tls);
+            } else {
+                nurl_pool_evict(req->pool, sock_fd);
+            }
+        } else {
+            nurl_tls_free(tls);
+            nurl_net_close(sock_fd);
+        }
         free(scheme); free(host); free(path);
         break;
     }
