@@ -43,4 +43,9 @@ void nurl_tls_close(nurl_tls_t *tls);
  */
 void nurl_tls_free(nurl_tls_t *tls);
 
+/**
+ * Returns the ALPN negotiated protocol, e.g. "h2" or "http/1.1", or NULL.
+ */
+const char *nurl_tls_get_negotiated_proto(nurl_tls_t *tls);
+
 #endif /* NURL_TLS_H */

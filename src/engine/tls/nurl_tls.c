@@ -8,6 +8,7 @@ struct nurl_tls {
     SSL_CTX *ctx;
     SSL *ssl;
     bool verify;
+    char negotiated_proto[32];
 };
 
 nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const char *cert_path, const char *key_path, bool force_tls12, bool force_tls13) {
@@ -24,6 +25,7 @@ nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const ch
     }
     tls->ssl = NULL;
     tls->verify = verify_certs;
+    tls->negotiated_proto[0] = '\0';
 
     // Use modern TLS client method
     const SSL_METHOD *method = TLS_client_method();
@@ -32,6 +34,10 @@ nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const ch
         free(tls);
         return NULL;
     }
+
+    // Offer HTTP/2 (h2) and HTTP/1.1 (http/1.1) protocols
+    static const unsigned char alpn_protos[] = "\x02h2\x08http/1.1";
+    SSL_CTX_set_alpn_protos(tls->ctx, alpn_protos, sizeof(alpn_protos) - 1);
 
     // Enforce TLS versions if requested
     if (force_tls12) {
@@ -113,6 +119,19 @@ int nurl_tls_handshake(nurl_tls_t *tls, int socket_fd, const char *hostname) {
         return -1;
     }
 
+    // Extract ALPN negotiated protocol
+    const unsigned char *alpn = NULL;
+    unsigned int alpn_len = 0;
+    SSL_get0_alpn_selected(tls->ssl, &alpn, &alpn_len);
+    if (alpn && alpn_len > 0) {
+        if (alpn_len < sizeof(tls->negotiated_proto)) {
+            memcpy(tls->negotiated_proto, alpn, alpn_len);
+            tls->negotiated_proto[alpn_len] = '\0';
+        }
+    } else {
+        tls->negotiated_proto[0] = '\0';
+    }
+
     return 0;
 }
 
@@ -146,4 +165,11 @@ void nurl_tls_free(nurl_tls_t *tls) {
         }
         free(tls);
     }
+}
+
+const char *nurl_tls_get_negotiated_proto(nurl_tls_t *tls) {
+    if (!tls || tls->negotiated_proto[0] == '\0') {
+        return NULL;
+    }
+    return tls->negotiated_proto;
 }
