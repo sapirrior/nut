@@ -13,46 +13,24 @@ static unsigned long get_elapsed_ms(struct timeval start, struct timeval end) {
     return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
 }
 
-static int ping_once(const char *method, const char *path, const char *host, int port, const CommonArgs *common, unsigned long *duration_ms, int *status_out, char **status_text_out) {
-    int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
-    if (sock_fd < 0) {
-        return -1;
-    }
-
+static int connect_and_handshake(const char *host, int port, const CommonArgs *common, int *out_sock, nurl_tls_t **out_tls) {
+    int fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
+    if (fd < 0) return -1;
     if (common->timeout > 0) {
-        nurl_net_set_timeout(sock_fd, common->timeout);
+        nurl_net_set_timeout(fd, common->timeout);
     }
-
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
-    if (!tls) {
-        nurl_net_close(sock_fd);
+    nurl_tls_t *t = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
+    if (!t) {
+        nurl_net_close(fd);
         return -1;
     }
-
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
-
-    if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
+    if (nurl_tls_handshake(t, fd, host) != 0) {
+        nurl_tls_free(t);
+        nurl_net_close(fd);
         return -1;
     }
-
-    nurl_http_response_t *res = nurl_http_request(tls, method, path, host, NULL, NULL, 0, NULL, 0, NULL, false, true, 0);
-    gettimeofday(&end, NULL);
-
-    nurl_tls_free(tls);
-    nurl_net_close(sock_fd);
-
-    if (!res) {
-        return -1;
-    }
-
-    *duration_ms = get_elapsed_ms(start, end);
-    *status_out = res->status_code;
-    *status_text_out = strdup(res->status_text);
-
-    nurl_http_response_free(res);
+    *out_sock = fd;
+    *out_tls = t;
     return 0;
 }
 
@@ -70,8 +48,23 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
     unsigned int count = common->ping_count > 0 ? common->ping_count : 1;
     unsigned long interval = common->ping_interval > 0 ? common->ping_interval : 1000;
 
+    int sock_fd = -1;
+    nurl_tls_t *tls = NULL;
+
+    if (connect_and_handshake(host, port, common, &sock_fd, &tls) != 0) {
+        fprintf(stderr, "nurl: (5) Initial TLS connection failed for %s\n", host);
+        free(scheme); free(host); free(path);
+        return NURL_ERR_TLS;
+    }
+
+    if (common->verbose && !common->silent) {
+        fprintf(stderr, "* Connected to %s:%d (TLS warm)\n", host, port);
+    }
+
     unsigned long *latencies = malloc(sizeof(unsigned long) * count);
     if (!latencies) {
+        nurl_tls_free(tls);
+        nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
         return NURL_ERR_GENERIC;
     }
@@ -82,30 +75,58 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
             usleep(interval * 1000);
         }
 
+        struct timeval start, end;
+        nurl_http_response_t *res = NULL;
         unsigned long duration = 0;
-        int status = 0;
-        char *status_text = NULL;
+        bool reconnected = false;
 
-        int ret = ping_once("HEAD", path, host, port, common, &duration, &status, &status_text);
-        if (ret == 0 && status == 405) {
-            free(status_text);
-            status_text = NULL;
-            ret = ping_once("GET", path, host, port, common, &duration, &status, &status_text);
+        while (1) {
+            gettimeofday(&start, NULL);
+            res = nurl_http_request(tls, "HEAD", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0);
+            gettimeofday(&end, NULL);
+
+            if (res && res->status_code == 405) {
+                // Method not allowed, retry with GET
+                nurl_http_response_free(res);
+                gettimeofday(&start, NULL);
+                res = nurl_http_request(tls, "GET", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0);
+                gettimeofday(&end, NULL);
+            }
+
+            if (!res) {
+                // Connection might have been closed by server (keep-alive timeout). Try to reconnect once.
+                if (!reconnected) {
+                    nurl_tls_free(tls);
+                    nurl_net_close(sock_fd);
+                    sock_fd = -1;
+                    tls = NULL;
+                    if (connect_and_handshake(host, port, common, &sock_fd, &tls) == 0) {
+                        reconnected = true;
+                        continue;
+                    }
+                }
+                break;
+            } else {
+                break;
+            }
         }
 
-        if (ret == 0) {
+        if (res) {
+            duration = get_elapsed_ms(start, end);
             latencies[success_count++] = duration;
             if (!common->silent) {
-                printf("%d  %s  %s  %lums\n", status, status_text, host, duration);
+                printf("%d  %s  %s  %lums\n", res->status_code, res->status_text, host, duration);
             }
-            free(status_text);
+            nurl_http_response_free(res);
         } else {
-            fprintf(stderr, "nurl: (2) Ping failed for %s\n", host);
-            free(scheme); free(host); free(path);
-            free(latencies);
-            return NURL_ERR_NETWORK;
+            fprintf(stderr, "nurl: (2) Ping failed for %s on iteration %u\n", host, i + 1);
+            break;
         }
     }
+
+    nurl_tls_free(tls);
+    nurl_net_close(sock_fd);
+    free(scheme); free(host); free(path);
 
     if (count > 1 && success_count > 0 && !common->silent) {
         unsigned long min = latencies[0];
@@ -120,7 +141,6 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
         printf("\nmin %lums  avg %lums  max %lums\n", min, avg, max);
     }
 
-    free(scheme); free(host); free(path);
     free(latencies);
-    return 0;
+    return (success_count > 0) ? 0 : NURL_ERR_NETWORK;
 }

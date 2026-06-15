@@ -103,6 +103,7 @@ nurl_http_response_t *nurl_http_request(
     }
 
     bool has_user_agent = false;
+    bool has_connection = false;
     if (extra_headers) {
         const char *p = extra_headers;
         while ((p = strcasestr(p, "User-Agent")) != NULL) {
@@ -115,22 +116,26 @@ nurl_http_response_t *nurl_http_request(
             }
             p++;
         }
+        p = extra_headers;
+        while ((p = strcasestr(p, "Connection")) != NULL) {
+            if (p == extra_headers || p[-1] == '\n' || p[-1] == '\r') {
+                const char *colon = strchr(p, ':');
+                if (colon) {
+                    has_connection = true;
+                    break;
+                }
+            }
+            p++;
+        }
     }
 
     int written;
-    if (has_user_agent) {
-        written = snprintf(req_buf, req_capacity,
-            "%s %s HTTP/1.1\r\n"
-            "Host: %s\r\n"
-            "Connection: close\r\n",
-            method, path, hostname);
-    } else {
-        written = snprintf(req_buf, req_capacity,
-            "%s %s HTTP/1.1\r\n"
-            "Host: %s\r\n"
-            "User-Agent: nurl/" NURL_VERSION "\r\n"
-            "Connection: close\r\n",
-            method, path, hostname);
+    written = snprintf(req_buf, req_capacity, "%s %s HTTP/1.1\r\nHost: %s\r\n", method, path, hostname);
+    if (!has_user_agent) {
+        written += snprintf(req_buf + written, req_capacity - written, "User-Agent: nurl/" NURL_VERSION "\r\n");
+    }
+    if (!has_connection) {
+        written += snprintf(req_buf + written, req_capacity - written, "Connection: close\r\n");
     }
 
     if (total_body_len > 0) {
@@ -300,6 +305,10 @@ nurl_http_response_t *nurl_http_request(
         }
     }
     free(headers_buf);
+
+    if (strcasecmp(method, "HEAD") == 0) {
+        return res;
+    }
 
     unsigned long total_len_computed = total_len;
     bool is_resume = (res->status_code == 206 && resume_offset > 0);
