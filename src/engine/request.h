@@ -1,7 +1,7 @@
 #ifndef NURL_ENGINE_REQUEST_H
 #define NURL_ENGINE_REQUEST_H
 
-#include "cli/args.h"
+#include "nurl.h"
 #include "engine/utils/nurl_headers.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -50,6 +50,7 @@ typedef struct {
 
     /* Download-specific */
     bool             resume;
+    bool             progress;
     unsigned long    resume_offset;
 
     /* Upload-specific */
@@ -58,7 +59,7 @@ typedef struct {
 
 NurlRequest *nurl_request_new(void);
 void         nurl_request_from_args(NurlRequest *req, const char *method,
-                                    const char *url, const BaseArgs *a);
+                                    const char *url, const CommonArgs *a);
 void         nurl_request_free(NurlRequest *req);
 
 #endif /* NURL_ENGINE_REQUEST_H */

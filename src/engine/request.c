@@ -9,7 +9,7 @@ NurlRequest *nurl_request_new(void) {
     return req;
 }
 
-void nurl_request_from_args(NurlRequest *req, const char *method, const char *url, const BaseArgs *a) {
+void nurl_request_from_args(NurlRequest *req, const char *method, const char *url, const CommonArgs *a) {
     if (!req || !a) return;
 
     req->method = method;
@@ -30,7 +30,7 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
 
     req->body = (const uint8_t *)a->data;
     req->body_len = a->data_len;
-    req->body_is_stream = a->data_is_stdin;
+    req->body_is_stream = false;
 
     req->timeout_sec = a->timeout;
     req->follow_redirect = a->location;
@@ -64,6 +64,9 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
     req->silent = a->silent;
     req->raw_output = a->raw;
     req->decompress = a->compressed;
+
+    req->resume = a->resume;
+    req->progress = a->progress;
 }
 
 void nurl_request_free(NurlRequest *req) {

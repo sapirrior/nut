@@ -3,16 +3,15 @@
 #include "nurl_tls.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
+#include "nurl_engine.h"
+#include "request.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <ctype.h>
-
-
 
 int nurl_cmd_download(const char *url, const CommonArgs *common) {
     char *scheme = NULL;
@@ -47,311 +46,124 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
         return NURL_ERR_GENERIC;
     }
 
-    // Check if file already exists for resuming
-    unsigned long start_pos = 0;
-    bool file_exists = false;
     bool is_stdout = (strcmp(filename, "-") == 0);
+    unsigned long start_pos = 0;
+
     if (common->resume && !is_stdout) {
         struct stat st;
         if (stat(filename, &st) == 0 && S_ISREG(st.st_mode)) {
             start_pos = (unsigned long)st.st_size;
-            file_exists = true;
         }
     }
 
-    // Connect and start TLS
-    int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
-    if (sock_fd < 0) {
-        fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
+    // Build the request
+    NurlRequest *req = nurl_request_new();
+    if (!req) {
         free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_NETWORK;
+        return NURL_ERR_OOM;
     }
 
-    if (common->timeout > 0) {
-        nurl_net_set_timeout(sock_fd, common->timeout);
-    }
+    nurl_request_from_args(req, "GET", url, common);
 
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
-    if (!tls) {
-        fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_TLS;
-    }
-
-    if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        fprintf(stderr, "nurl: (5) TLS verification failed.\n");
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_TLS;
-    }
-
-    // Compile custom headers
-    size_t extra_hdr_capacity = 1024;
-    char *extra_hdr = malloc(extra_hdr_capacity);
-    if (!extra_hdr) {
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_GENERIC;
-    }
-    extra_hdr[0] = '\0';
-    size_t extra_hdr_len = 0;
-    bool oom = false;
-
-    // 1. User specified headers
-    for (size_t i = 0; i < common->header_count; i++) {
-        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "%s\r\n", common->header[i])) {
-            oom = true; break;
-        }
-    }
-
-    // 2. Resume Range Header
-    if (!oom && start_pos > 0) {
-        char range_val[64];
-        snprintf(range_val, sizeof(range_val), "bytes=%lu-", start_pos);
-        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Range: %s\r\n", range_val)) {
-            oom = true;
-        }
-    }
-
-    // 3. Auth Headers
-    if (!oom && !common->no_auth) {
-        if (common->bearer || common->token) {
-            const char *tok = common->bearer ? common->bearer : common->token;
-            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
-                if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Authorization: Bearer %s\r\n", tok)) {
-                    oom = true;
-                }
-            }
-        } else if (common->user) {
-            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
-                char *b64 = nurl_utils_base64_encode((const unsigned char *)common->user, strlen(common->user));
-                if (b64) {
-                    if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "Authorization: Basic %s\r\n", b64)) {
-                        oom = true;
-                    }
-                    free(b64);
-                } else {
-                    oom = true;
-                }
-            }
-        }
-    }
-
-    if (!oom && common->user_agent) {
-        if (!nurl_utils_has_header(common->header, common->header_count, "User-Agent")) {
-            if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_capacity, "User-Agent: %s\r\n", common->user_agent)) {
-                oom = true;
-            }
-        }
-    }
-
-    if (oom) {
-        fprintf(stderr, "nurl: (1) Out of memory.\n");
-        free(extra_hdr);
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_GENERIC;
-    }
-
-    // Construct and send Request
-    size_t req_capacity = 2048 + extra_hdr_len;
-    char *req_buf = malloc(req_capacity);
-    if (!req_buf) {
-        free(extra_hdr);
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_GENERIC;
-    }
-
-    int written = snprintf(req_buf, req_capacity,
-        "GET %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "User-Agent: nurl/" NURL_VERSION "\r\n"
-        "Connection: close\r\n%s\r\n",
-        path, host, extra_hdr);
-    free(extra_hdr);
-
-    if (nurl_tls_write(tls, req_buf, written) <= 0) {
-        free(req_buf);
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_NETWORK;
-    }
-    free(req_buf);
-
-    // Read Response Headers
-    size_t header_buf_cap = 8192;
-    char *header_buf = malloc(header_buf_cap);
-    if (!header_buf) {
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_GENERIC;
-    }
-    size_t header_buf_len = 0;
-    char *boundary = NULL;
-
-    while (header_buf_len < header_buf_cap - 1) {
-        int n = nurl_tls_read(tls, header_buf + header_buf_len, 1);
-        if (n <= 0) {
-            break;
-        }
-        header_buf_len++;
-        header_buf[header_buf_len] = '\0';
-
-        if (header_buf_len >= 4 && strcmp(header_buf + header_buf_len - 4, "\r\n\r\n") == 0) {
-            boundary = header_buf + header_buf_len;
-            break;
-        }
-    }
-
-    if (!boundary) {
-        fprintf(stderr, "nurl: (2) Malformed HTTP response headers.\n");
-        free(header_buf);
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_NETWORK;
-    }
-
-    // Parse status code
-    int status_code = 0;
-    char *status_line = strtok(header_buf, "\r\n");
-    if (status_line) {
-        char *space = strchr(status_line, ' ');
-        if (space) {
-            status_code = atoi(space + 1);
-        }
-    }
-
-    // Look for Content-Length and Content-Range headers
-    unsigned long content_len = 0;
-    unsigned long total_len = 0;
-    char *line;
-    bool is_resume = (status_code == 206 && file_exists);
-
-    while ((line = strtok(NULL, "\r\n")) != NULL) {
-        char *colon = strchr(line, ':');
-        if (colon) {
-            *colon = '\0';
-            char *key = line;
-            char *val = colon + 1;
-            while (isspace((unsigned char)*val)) val++;
-
-            if (strcasecmp(key, "Content-Length") == 0) {
-                content_len = strtoul(val, NULL, 10);
-            } else if (strcasecmp(key, "Content-Range") == 0) {
-                // e.g. "bytes 100-200/500" -> extract 500
-                char *slash = strchr(val, '/');
-                if (slash) {
-                    total_len = strtoul(slash + 1, NULL, 10);
-                }
-            }
-        }
-    }
-    free(header_buf);
-
-    if (total_len == 0) {
-        total_len = is_resume ? (content_len + start_pos) : content_len;
-    }
-
-    // Open output file
-    FILE *out = NULL;
-    if (is_stdout) {
-        out = stdout;
-    } else {
-        out = fopen(filename, is_resume ? "ab" : "wb");
-    }
-    if (!out) {
-        fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", filename);
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(filename); free(scheme); free(host); free(path);
-        return NURL_ERR_WRITE;
-    }
-
+    // Verbose notice
     if (!common->silent) {
         fprintf(stderr, "* Downloading %s\n", filename);
-        if (total_len > 0) {
-            fprintf(stderr, "* Size: %.2f MB\n", (double)total_len / (1024.0 * 1024.0));
-        } else {
-            fprintf(stderr, "* Size: Unknown\n");
+        if (start_pos > 0) {
+            fprintf(stderr, "* Resuming from offset: %lu\n", start_pos);
         }
     }
 
-    // Stream download chunks
-    char chunk[4096];
-    unsigned long downloaded = is_resume ? start_pos : 0;
-    struct timeval start_time, last_update;
-    gettimeofday(&start_time, NULL);
-    last_update = start_time;
+    unsigned int max_retries = common->retry;
+    unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;
+    int engine_err = NURL_OK;
+    nurl_http_response_t *res = NULL;
+    char *effective_url = NULL;
 
-    int n;
-    while ((n = nurl_tls_read(tls, chunk, sizeof(chunk))) > 0) {
-        if (fwrite(chunk, 1, n, out) != (size_t)n) {
-            fprintf(stderr, "\nnurl: (6) Disk write failed.\n");
-            if (!is_stdout) {
-                fclose(out);
+    for (unsigned int attempt = 0; attempt <= max_retries; attempt++) {
+        if (res) {
+            nurl_http_response_free(res);
+            res = NULL;
+        }
+        if (effective_url) {
+            free(effective_url);
+            effective_url = NULL;
+        }
+
+        // Determine resume offset for this attempt
+        unsigned long current_offset = 0;
+        if (!is_stdout) {
+            struct stat st;
+            if (stat(filename, &st) == 0 && S_ISREG(st.st_mode)) {
+                current_offset = (unsigned long)st.st_size;
             }
-            nurl_tls_free(tls);
-            nurl_net_close(sock_fd);
+        } else {
+            current_offset = start_pos;
+        }
+
+        // Open/reopen the output file
+        FILE *out = NULL;
+        if (is_stdout) {
+            out = stdout;
+        } else {
+            out = fopen(filename, (current_offset > 0) ? "ab" : "wb");
+        }
+        if (!out) {
+            fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", filename);
+            nurl_request_free(req);
             free(filename); free(scheme); free(host); free(path);
             return NURL_ERR_WRITE;
         }
-        downloaded += n;
 
-        // Print progress bar if not silent
-        struct timeval now;
-        gettimeofday(&now, NULL);
-        double elapsed_sec = (now.tv_sec - start_time.tv_sec) + (now.tv_usec - start_time.tv_usec) / 1000000.0;
-        double since_last_sec = (now.tv_sec - last_update.tv_sec) + (now.tv_usec - last_update.tv_usec) / 1000000.0;
+        req->out = out;
+        req->resume_offset = current_offset;
 
-        if (!common->silent && (since_last_sec >= 0.2 || downloaded == total_len)) {
-            last_update = now;
-            double speed_mb = 0.0;
-            if (elapsed_sec > 0.0) {
-                speed_mb = ((double)(downloaded - (is_resume ? start_pos : 0)) / (1024.0 * 1024.0)) / elapsed_sec;
+        engine_err = nurl_engine_execute_request(req, &res, &effective_url);
+
+        if (!is_stdout) {
+            fclose(out);
+        } else {
+            fflush(out);
+        }
+
+        if (engine_err == NURL_OK && res) {
+            if (res->status_code < 500) {
+                // Success, break out of retry loop
+                break;
+            } else {
+                // 5xx error, retry
+                if (attempt < max_retries && !common->silent) {
+                    fprintf(stderr, "nurl: Warning: HTTP %d. Retrying in %lu seconds...\n", res->status_code, delay_sec);
+                }
             }
-
-            int percent = 0;
-            if (total_len > 0) {
-                percent = (int)(((double)downloaded / (double)total_len) * 100.0);
+        } else {
+            // Network failure, retry
+            if (attempt < max_retries && !common->silent) {
+                fprintf(stderr, "nurl: Warning: Request failed (error %d). Retrying in %lu seconds...\n", engine_err, delay_sec);
             }
+        }
 
-            double remaining_sec = 0.0;
-            if (total_len > downloaded && speed_mb > 0.0) {
-                remaining_sec = (double)(total_len - downloaded) / (speed_mb * 1024.0 * 1024.0);
-            }
-
-            fprintf(stderr, "\r  %.2f MB / %.2f MB  %d%%  %.2f MB/s  %.0fs left",
-                (double)downloaded / (1024.0 * 1024.0),
-                (double)total_len / (1024.0 * 1024.0),
-                percent,
-                speed_mb,
-                remaining_sec);
-            fflush(stderr);
+        if (attempt < max_retries) {
+            sleep(delay_sec);
         }
     }
 
-    if (!is_stdout) {
-        fclose(out);
-    } else {
-        fflush(out);
-    }
-    nurl_tls_free(tls);
-    nurl_net_close(sock_fd);
-
-    if (!common->silent) {
-        fprintf(stderr, "\n* Download complete: %s\n", filename);
+    int ret_code = engine_err;
+    if (engine_err == NURL_OK && res) {
+        if (res->status_code >= 500) {
+            ret_code = NURL_ERR_STATUS_5XX;
+        } else if (res->status_code >= 400) {
+            ret_code = NURL_ERR_STATUS_4XX;
+        }
     }
 
-    free(filename);
-    free(scheme); free(host); free(path);
-    return 0;
+    if (res) {
+        nurl_http_response_free(res);
+    }
+    if (effective_url) {
+        free(effective_url);
+    }
+    nurl_request_free(req);
+    free(filename); free(scheme); free(host); free(path);
+
+    return ret_code;
 }

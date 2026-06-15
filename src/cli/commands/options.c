@@ -159,7 +159,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         fprintf(stderr, "> \n");
     }
 
-    nurl_http_response_t *res = nurl_http_request(tls, "OPTIONS", path, host, extra_hdr, NULL, 0);
+    nurl_http_response_t *res = nurl_http_request(tls, "OPTIONS", path, host, extra_hdr, NULL, 0, NULL, false, true, 0);
     free(extra_hdr);
 
     if (!res) {

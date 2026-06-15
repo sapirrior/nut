@@ -84,6 +84,12 @@ int nurl_engine_execute_request(
             nurl_headers_add_raw(temp_hdrs, req->headers->entries[i]);
         }
 
+        if (req->resume_offset > 0 && !nurl_headers_has(temp_hdrs, "Range")) {
+            char range_val[64];
+            snprintf(range_val, sizeof(range_val), "bytes=%lu-", req->resume_offset);
+            nurl_headers_add(temp_hdrs, "Range", range_val);
+        }
+
         // Dynamic Cookie compilation
         nurl_cookie_jar_t *loaded_jar = NULL;
         bool jar_loaded = false;
@@ -186,7 +192,7 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len);
+        res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->out, req->progress, req->silent, req->resume_offset);
         free(extra_hdr);
 
         if (!res) {

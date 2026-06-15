@@ -58,6 +58,8 @@ typedef struct {
     char     *cookie;
     char     *cookie_jar;
     char     *session;
+    bool      resume;
+    bool      progress;
 } BaseArgs;
 
 /* Download-only */

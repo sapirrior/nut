@@ -86,7 +86,7 @@ bool nurl_headers_has(const NurlHeaderList *h, const char *key) {
     return false;
 }
 
-nurl_err_t nurl_headers_apply_auth(NurlHeaderList *h, const BaseArgs *a) {
+nurl_err_t nurl_headers_apply_auth(NurlHeaderList *h, const CommonArgs *a) {
     if (!h || !a) return NURL_ERR_GENERIC;
     if (a->no_auth) return NURL_OK;
 
@@ -111,7 +111,7 @@ nurl_err_t nurl_headers_apply_auth(NurlHeaderList *h, const BaseArgs *a) {
     return NURL_OK;
 }
 
-nurl_err_t nurl_headers_apply_common(NurlHeaderList *h, const BaseArgs *a) {
+nurl_err_t nurl_headers_apply_common(NurlHeaderList *h, const CommonArgs *a) {
     if (!h || !a) return NURL_ERR_GENERIC;
 
     if (a->user_agent && !nurl_headers_has(h, "User-Agent")) {

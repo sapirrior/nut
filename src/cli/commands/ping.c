@@ -38,7 +38,7 @@ static int ping_once(const char *method, const char *path, const char *host, int
         return -1;
     }
 
-    nurl_http_response_t *res = nurl_http_request(tls, method, path, host, NULL, NULL, 0);
+    nurl_http_response_t *res = nurl_http_request(tls, method, path, host, NULL, NULL, 0, NULL, false, true, 0);
     gettimeofday(&end, NULL);
 
     nurl_tls_free(tls);

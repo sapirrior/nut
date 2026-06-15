@@ -263,7 +263,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         return NURL_ERR_TLS;
     }
 
-    nurl_http_response_t *res = nurl_http_request(tls, "POST", path, host, extra_hdr, body, body_len);
+    nurl_http_response_t *res = nurl_http_request(tls, "POST", path, host, extra_hdr, body, body_len, NULL, false, true, 0);
 
     free(body);
     free(extra_hdr);

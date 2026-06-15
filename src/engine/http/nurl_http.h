@@ -23,6 +23,8 @@ typedef struct {
  * body_len: Length of payload in bytes.
  * Returns a dynamically allocated nurl_http_response_t pointer on success, or NULL on error.
  */
+#include <stdio.h>
+
 nurl_http_response_t *nurl_http_request(
     nurl_tls_t *tls,
     const char *method,
@@ -30,7 +32,11 @@ nurl_http_response_t *nurl_http_request(
     const char *hostname,
     const char *extra_headers,
     const unsigned char *body,
-    size_t body_len
+    size_t body_len,
+    FILE *body_out,
+    bool show_progress,
+    bool silent,
+    unsigned long resume_offset
 );
 
 /**

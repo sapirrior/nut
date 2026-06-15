@@ -126,7 +126,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
 
     NurlRequest *req = nurl_request_new();
     if (!req) return NURL_ERR_OOM;
-    nurl_request_from_args(req, method, url, (const BaseArgs *)common);
+    nurl_request_from_args(req, method, url, common);
 
     unsigned int max_retries = common->retry;
     unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;
