@@ -2,7 +2,7 @@
 #define NURL_H
 
 #ifndef NURL_VERSION
-#define NURL_VERSION "0.1.1"
+#define NURL_VERSION "0.1.2"
 #endif
 
 #include <stdbool.h>

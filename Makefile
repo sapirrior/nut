@@ -1,5 +1,5 @@
 CC = gcc
-VERSION ?= 0.1.1
+VERSION ?= 0.1.2
 CFLAGS = -std=c11 -Wall -Wextra -Os -ffunction-sections -fdata-sections -fno-ident \
          -Isrc/cli -Isrc/cli/parser -Isrc/cli/runner -Isrc/cli/commands \
          -Isrc/engine -Isrc/engine/net -Isrc/engine/tls -Isrc/engine/http -Isrc/engine/utils \
