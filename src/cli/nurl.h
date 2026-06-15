@@ -98,17 +98,6 @@ typedef struct {
     size_t upload_fields_count;
 } CommonArgs;
 
-typedef enum {
-    NURL_OK = 0,
-    NURL_ERR_GENERIC = 1,
-    NURL_ERR_NETWORK = 2,
-    NURL_ERR_TIMEOUT = 3,
-    NURL_ERR_INVALID_URL = 4,
-    NURL_ERR_BAD_ARGS = 4,
-    NURL_ERR_TLS = 5,
-    NURL_ERR_WRITE = 6,
-    NURL_ERR_STATUS_4XX = 22,
-    NURL_ERR_STATUS_5XX = 43
-} nurl_err_t;
+#include "engine/utils/nurl_error.h"
 
 #endif /* NURL_H */

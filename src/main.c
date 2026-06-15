@@ -76,11 +76,15 @@ int main(int argc, char **argv) {
     char *command = NULL;
     char *url = NULL;
 
-    if (nurl_cli_parse(argc, argv, &args, &command, &url) != 0) {
-        print_help(argv[0]);
+    int parse_res = nurl_cli_parse(argc, argv, &args, &command, &url);
+    if (parse_res != 0) {
+        if (parse_res == -1) {
+            print_help(argv[0]);
+            parse_res = 0; // Exit with 0 on help
+        }
         nurl_cli_free_args(&args);
         nurl_net_cleanup();
-        return 1;
+        return parse_res;
     }
 
     // Load and merge default configurations

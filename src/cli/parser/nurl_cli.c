@@ -1,9 +1,11 @@
 #include "nurl_cli.h"
+#include "engine/utils/nurl_error.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
 #include <strings.h>
+#include <ctype.h>
 
 void nurl_cli_init_args(CommonArgs *args) {
     memset(args, 0, sizeof(CommonArgs));
@@ -26,6 +28,59 @@ static bool is_subcommand(const char *arg) {
         }
     }
     return false;
+}
+
+static bool looks_like_url(const char *arg) {
+    if (strstr(arg, "://") != NULL) return true;
+    if (strchr(arg, '.') != NULL) return true;
+    if (strchr(arg, '/') != NULL) return true;
+    if (strcmp(arg, "localhost") == 0) return true;
+    return false;
+}
+
+static int edit_distance(const char *s1, const char *s2) {
+    int len1 = strlen(s1);
+    int len2 = strlen(s2);
+    int matrix[32][32];
+    if (len1 > 31) len1 = 31;
+    if (len2 > 31) len2 = 31;
+
+    for (int i = 0; i <= len1; i++) matrix[i][0] = i;
+    for (int j = 0; j <= len2; j++) matrix[0][j] = j;
+
+    for (int i = 1; i <= len1; i++) {
+        for (int j = 1; j <= len2; j++) {
+            int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
+            int a = matrix[i - 1][j] + 1;
+            int b = matrix[i][j - 1] + 1;
+            int c = matrix[i - 1][j - 1] + cost;
+            int min = a < b ? a : b;
+            matrix[i][j] = min < c ? min : c;
+        }
+    }
+    return matrix[len1][len2];
+}
+
+static const char *suggest_command(const char *arg) {
+    const char *commands[] = {
+        "get", "post", "put", "delete", "head", "patch", "options",
+        "download", "upload", "inspect", "ping", "resolve"
+    };
+    size_t count = sizeof(commands) / sizeof(commands[0]);
+    const char *best_match = NULL;
+    int min_dist = 999;
+
+    for (size_t i = 0; i < count; i++) {
+        int dist = edit_distance(arg, commands[i]);
+        if (dist < min_dist) {
+            min_dist = dist;
+            best_match = commands[i];
+        }
+    }
+    if (min_dist <= 3) {
+        return best_match;
+    }
+    return NULL;
 }
 
 int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char **url) {
@@ -72,6 +127,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"retry-delay",     required_argument, NULL, 20},
         {"referer",         required_argument, NULL, 'e'},
         {"fail",            no_argument,       NULL, 'f'},
+        {"tls1.2",          no_argument,       NULL, 21},
+        {"tls1.3",          no_argument,       NULL, 22},
         {NULL, 0, NULL, 0}
     };
 
@@ -131,12 +188,22 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 }
                 break;
             case 't':
+                for (size_t i = 0; i < strlen(optarg); i++) {
+                    if (!isdigit((unsigned char)optarg[i])) {
+                        nurl_err(NURL_ERR_ARG, "invalid timeout '%s', expected a number in seconds", optarg);
+                        return NURL_ERR_ARG;
+                    }
+                }
                 args->timeout = strtoul(optarg, NULL, 10);
                 break;
             case 'L':
                 args->location = true;
                 break;
             case 'H': {
+                if (strchr(optarg, ':') == NULL) {
+                    nurl_err(NURL_ERR_ARG, "header '%s' is missing ':', use 'Key: Value' format", optarg);
+                    return NURL_ERR_ARG;
+                }
                 char **temp = realloc(args->header, sizeof(char *) * (args->header_count + 1));
                 if (!temp) {
                     fprintf(stderr, "Error: Out of memory.\n");
@@ -297,12 +364,31 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 18:
                 args->compressed = true;
                 break;
-            case 19:
-                args->retry = (unsigned int)strtoul(optarg, NULL, 10);
+            case 19: {
+                for (size_t i = 0; i < strlen(optarg); i++) {
+                    if (!isdigit((unsigned char)optarg[i])) {
+                        nurl_err(NURL_ERR_ARG, "invalid retry count '%s', expected a positive integer", optarg);
+                        return NURL_ERR_ARG;
+                    }
+                }
+                unsigned long r = strtoul(optarg, NULL, 10);
+                if (r > 99) {
+                    nurl_err(NURL_ERR_ARG, "retry count %lu is too large, maximum is 99", r);
+                    return NURL_ERR_ARG;
+                }
+                args->retry = (unsigned int)r;
                 break;
-            case 20:
+            }
+            case 20: {
+                for (size_t i = 0; i < strlen(optarg); i++) {
+                    if (!isdigit((unsigned char)optarg[i])) {
+                        nurl_err(NURL_ERR_ARG, "invalid retry delay '%s', expected a positive integer", optarg);
+                        return NURL_ERR_ARG;
+                    }
+                }
                 args->retry_delay = strtoul(optarg, NULL, 10);
                 break;
+            }
             case 'e':
                 if (args->referer) free(args->referer);
                 args->referer = strdup(optarg);
@@ -313,6 +399,12 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 break;
             case 'f':
                 args->fail = true;
+                break;
+            case 21:
+                args->tls12 = true;
+                break;
+            case 22:
+                args->tls13 = true;
                 break;
             case 'V':
                 printf("nurl %s\n", NURL_VERSION);
@@ -325,14 +417,30 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         }
     }
 
+    if (args->tls12 && args->tls13) {
+        nurl_err(NURL_ERR_ARG, "cannot enforce both TLS v1.2 and TLS v1.3");
+        return NURL_ERR_ARG;
+    }
+
     int remaining = argc - optind;
     if (remaining <= 0) {
-        fprintf(stderr, "nurl: no URL specified!\n");
-        return -1;
+        nurl_err(NURL_ERR_ARG, "no URL specified!");
+        return NURL_ERR_ARG;
+    }
+
+    const char *first = argv[optind];
+    if (!is_subcommand(first) && !looks_like_url(first)) {
+        nurl_err(NURL_ERR_ARG, "unknown command '%s'", first);
+        const char *suggestion = suggest_command(first);
+        if (suggestion) {
+            nurl_hint("did you mean: %s", suggestion);
+        } else {
+            nurl_hint("available commands: get, post, put, delete, head, patch, options, download, upload, inspect, ping, resolve");
+        }
+        return NURL_ERR_ARG;
     }
 
     if (remaining >= 2) {
-        const char *first = argv[optind];
         if (is_subcommand(first)) {
             *command = strdup(first);
             if (strcasecmp(first, "upload") == 0) {
@@ -353,7 +461,6 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             *url = strdup(first);
         }
     } else {
-        const char *first = argv[optind];
         if (is_subcommand(first)) {
             fprintf(stderr, "nurl: subcommand '%s' requires a target URL.\n", first);
             return -1;
