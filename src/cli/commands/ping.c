@@ -23,7 +23,7 @@ static int ping_once(const char *method, const char *path, const char *host, int
         nurl_net_set_timeout(sock_fd, common->timeout);
     }
 
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key);
+    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
     if (!tls) {
         nurl_net_close(sock_fd);
         return -1;

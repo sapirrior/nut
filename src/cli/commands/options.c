@@ -56,7 +56,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         nurl_net_set_timeout(sock_fd, common->timeout);
     }
 
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key);
+    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
     if (!tls) {
         fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
         nurl_net_close(sock_fd);

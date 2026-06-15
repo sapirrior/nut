@@ -10,29 +10,7 @@
 #include <unistd.h>
 #include <ctype.h>
 
-static bool append_hdr_str(char **buf, size_t *len, size_t *cap, const char *fmt, const char *val) {
-    size_t needed = strlen(fmt) + (val ? strlen(val) : 0) + 16;
-    if (*len + needed >= *cap) {
-        *cap = (*cap + needed) * 2;
-        char *temp = realloc(*buf, *cap);
-        if (!temp) return false;
-        *buf = temp;
-    }
-    int written = snprintf(*buf + *len, *cap - *len, fmt, val);
-    if (written < 0) return false;
-    *len += written;
-    return true;
-}
 
-static bool has_header(char **headers, size_t count, const char *key) {
-    size_t key_len = strlen(key);
-    for (size_t i = 0; i < count; i++) {
-        if (strncasecmp(headers[i], key, key_len) == 0 && headers[i][key_len] == ':') {
-            return true;
-        }
-    }
-    return false;
-}
 
 int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!common->upload_file) {
@@ -163,7 +141,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     bool oom = false;
 
     for (size_t i = 0; i < common->header_count; i++) {
-        if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "%s\r\n", common->header[i])) {
+        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "%s\r\n", common->header[i])) {
             oom = true; break;
         }
     }
@@ -171,7 +149,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!oom) {
         char ct_hdr[256];
         snprintf(ct_hdr, sizeof(ct_hdr), "Content-Type: multipart/form-data; boundary=%s\r\n", boundary);
-        if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "%s", ct_hdr)) {
+        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "%s", ct_hdr)) {
             oom = true;
         }
     }
@@ -179,16 +157,16 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!oom && !common->no_auth) {
         if (common->bearer || common->token) {
             const char *tok = common->bearer ? common->bearer : common->token;
-            if (!has_header(common->header, common->header_count, "Authorization")) {
-                if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "Authorization: Bearer %s\r\n", tok)) {
+            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
+                if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "Authorization: Bearer %s\r\n", tok)) {
                     oom = true;
                 }
             }
         } else if (common->user) {
-            if (!has_header(common->header, common->header_count, "Authorization")) {
+            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
                 char *b64 = nurl_utils_base64_encode((const unsigned char *)common->user, strlen(common->user));
                 if (b64) {
-                    if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "Authorization: Basic %s\r\n", b64)) {
+                    if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "Authorization: Basic %s\r\n", b64)) {
                         oom = true;
                     }
                     free(b64);
@@ -200,8 +178,8 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     }
 
     if (!oom && common->user_agent) {
-        if (!has_header(common->header, common->header_count, "User-Agent")) {
-            if (!append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "User-Agent: %s\r\n", common->user_agent)) {
+        if (!nurl_utils_has_header(common->header, common->header_count, "User-Agent")) {
+            if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "User-Agent: %s\r\n", common->user_agent)) {
                 oom = true;
             }
         }
@@ -239,7 +217,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         nurl_net_set_timeout(sock_fd, common->timeout);
     }
 
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key);
+    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
     if (!tls) {
         fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
         nurl_net_close(sock_fd);

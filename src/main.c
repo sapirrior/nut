@@ -6,6 +6,7 @@
 #include "nurl_cli.h"
 #include "nurl_runner.h"
 #include "nurl_config.h"
+#include "nurl_net.h"
 
 static void print_help(const char *prog_name) {
     printf("NetworkURL (nurl) — A clean, fast, and structured HTTP client CLI\n\n");
@@ -46,10 +47,22 @@ static void print_help(const char *prog_name) {
     printf("  -v, --verbose         Print verbose logs with request (> ) and response (< ) details\n");
     printf("  -s, --silent          Suppress all output logging\n");
     printf("  --raw                 Print raw, unformatted JSON responses\n");
+    printf("  --compressed          Request compressed response and decompress automatically\n");
+    printf("  -e, --referer <val>   Referer URL header value\n");
+    printf("  -f, --fail            Fail silently on server errors (return non-zero on 4xx/5xx)\n");
+    printf("  --retry <num>         Number of retries on network/5xx transient errors\n");
+    printf("  --retry-delay <sec>   Delay between retries in seconds (default: 1)\n");
+    printf("  --tls1.2              Enforce TLS v1.2 protocol\n");
+    printf("  --tls1.3              Enforce TLS v1.3 protocol\n");
     printf("  -h, --help            Print this help dialogue\n");
 }
 
 int main(int argc, char **argv) {
+    if (nurl_net_init() != 0) {
+        fprintf(stderr, "Error: Network initialization failed.\n");
+        return 1;
+    }
+
     CommonArgs args;
     char *command = NULL;
     char *url = NULL;
@@ -57,6 +70,7 @@ int main(int argc, char **argv) {
     if (nurl_cli_parse(argc, argv, &args, &command, &url) != 0) {
         print_help(argv[0]);
         nurl_cli_free_args(&args);
+        nurl_net_cleanup();
         return 1;
     }
 
@@ -75,6 +89,7 @@ int main(int argc, char **argv) {
     free(command);
     free(url);
     nurl_cli_free_args(&args);
+    nurl_net_cleanup();
 
     return result;
 }
