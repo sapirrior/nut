@@ -388,7 +388,7 @@ Replace the single-compilation Makefile with a proper object-file build:
 
 ```makefile
 CC      = gcc
-VERSION ?= 0.1.3
+VERSION ?= 0.2.0
 CFLAGS  = -std=c11 -Wall -Wextra -Os -ffunction-sections -fdata-sections \
           -fno-ident -D_GNU_SOURCE -DNURL_VERSION=\"$(VERSION)\" \
           -Isrc -Isrc/cli -Isrc/engine -Isrc/engine/utils \
