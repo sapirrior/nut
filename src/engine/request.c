@@ -15,16 +15,16 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
     req->method = method;
     req->url = url;
 
-    // Headers List
-    req->headers = nurl_headers_new();
+    // Headers Map
+    req->headers = nurl_headermap_new();
     if (req->headers) {
         for (size_t i = 0; i < a->header_count; i++) {
-            nurl_headers_add_raw(req->headers, a->header[i]);
+            nurl_headermap_add_raw(req->headers, a->header[i]);
         }
-        nurl_headers_apply_auth(req->headers, a);
-        nurl_headers_apply_common(req->headers, a);
-        if (a->compressed && !nurl_headers_has(req->headers, "Accept-Encoding")) {
-            nurl_headers_add(req->headers, "Accept-Encoding", "gzip, deflate");
+        nurl_headermap_apply_auth(req->headers, a);
+        nurl_headermap_apply_common(req->headers, a);
+        if (a->compressed && !nurl_headermap_has(req->headers, "Accept-Encoding")) {
+            nurl_headermap_set(req->headers, "Accept-Encoding", "gzip, deflate");
         }
     }
 
@@ -72,7 +72,7 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
 void nurl_request_free(NurlRequest *req) {
     if (!req) return;
     if (req->headers) {
-        nurl_headers_free(req->headers);
+        nurl_headermap_free(req->headers);
     }
     if (req->body_parts) {
         free(req->body_parts);

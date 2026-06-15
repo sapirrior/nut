@@ -131,7 +131,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     // Add Content-Type multipart header
     char ct_val[256];
     snprintf(ct_val, sizeof(ct_val), "multipart/form-data; boundary=%s", boundary);
-    nurl_headers_add(req->headers, "Content-Type", ct_val);
+    nurl_headermap_set(req->headers, "Content-Type", ct_val);
 
     req->body_parts = malloc(sizeof(NurlBodyPart) * 3);
     if (!req->body_parts) {

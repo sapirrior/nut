@@ -100,7 +100,7 @@ int nurl_engine_execute_request(
             }
         }
 
-        NurlHeaderList *temp_hdrs = nurl_headers_new();
+        NurlHeaderMap *temp_hdrs = nurl_headermap_new();
         if (!temp_hdrs) {
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
@@ -110,13 +110,13 @@ int nurl_engine_execute_request(
 
         // Copy base headers
         for (size_t i = 0; i < req->headers->count; i++) {
-            nurl_headers_add_raw(temp_hdrs, req->headers->entries[i]);
+            nurl_headermap_append(temp_hdrs, req->headers->keys[i], req->headers->values[i]);
         }
 
-        if (req->resume_offset > 0 && !nurl_headers_has(temp_hdrs, "Range")) {
+        if (req->resume_offset > 0 && !nurl_headermap_has(temp_hdrs, "Range")) {
             char range_val[64];
             snprintf(range_val, sizeof(range_val), "bytes=%lu-", req->resume_offset);
-            nurl_headers_add(temp_hdrs, "Range", range_val);
+            nurl_headermap_set(temp_hdrs, "Range", range_val);
         }
 
         // Dynamic Cookie compilation
@@ -179,15 +179,15 @@ int nurl_engine_execute_request(
         }
 
         if (cookie_hdr && cookie_hdr_len > 0) {
-            if (!nurl_headers_has(temp_hdrs, "Cookie")) {
-                nurl_headers_add(temp_hdrs, "Cookie", cookie_hdr);
+            if (!nurl_headermap_has(temp_hdrs, "Cookie")) {
+                nurl_headermap_set(temp_hdrs, "Cookie", cookie_hdr);
             }
         }
         free(cookie_hdr);
         if (loaded_jar) nurl_cookie_jar_free(loaded_jar);
 
-        char *extra_hdr = nurl_headers_serialize(temp_hdrs);
-        nurl_headers_free(temp_hdrs);
+        char *extra_hdr = nurl_headermap_serialize(temp_hdrs);
+        nurl_headermap_free(temp_hdrs);
 
         if (!extra_hdr) {
             nurl_tls_free(tls);

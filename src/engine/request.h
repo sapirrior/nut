@@ -24,7 +24,7 @@ typedef struct {
 typedef struct {
     const char      *method;       /* "GET", "POST", etc. */
     const char      *url;
-    NurlHeaderList  *headers;
+    NurlHeaderMap  *headers;
     const uint8_t   *body;
     size_t           body_len;
     bool             body_is_stream; /* read from stdin lazily */
