@@ -15,16 +15,16 @@ src/
 ├── main.c                  # Program entry point (WSA startup/cleanup)
 ├── cli/                    # CLI Interface Layer
 │   ├── parser/             # Argument parsing (nurl_cli.c)
-│   ├── runner/             # Subcommand routing & output styling (nurl_request.c)
+│   ├── runner/             # Subcommand routing & progress reporting (nurl_progress.c)
 │   └── commands/           # HTTP command drivers (download.c, upload.c, ping.c, etc.)
 ├── engine/                 # Protocol & Network Engine Layer
-│   ├── nurl_engine.c       # Central engine request orchestrator
-│   ├── net/                # TCP Socket & Proxy handler (Winsock/POSIX abstractions)
+│   ├── nurl_engine.c       # Central engine request orchestrator (Stage-based)
+│   ├── net/                # Buffered I/O (NurlStream) & Proxy handler
 │   ├── tls/                # OpenSSL contexts & verification setup
-│   ├── http/               # HTTP parser, gzip/deflate decompression, redirect resolution
-│   └── utils/              # Cookies manager, configurations, base64 & high-res time utilities
+│   ├── http/               # HTTP parser, gzip/deflate decompression, redirects
+│   └── utils/              # Cookies manager, configurations, base64 & high-res time
 └── errors/                 # Smart Error DX Layer
-    ├── nurl_diag.c         # Standardized block-formatted output
+    ├── nurl_diag.c         # Concise Unix-style diagnostics
     ├── nurl_error_handler.c # Context-aware diagnostic logic
     └── nurl_error.c        # Centralized error code definitions
 ```
@@ -33,17 +33,12 @@ src/
 
 ## 2. Smart Error DX (Developer Experience)
 
-`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes, you get clear, unindented plain-text blocks:
+`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints:
 
 ```text
-[ Error ]
-Network connection reset or interrupted during the request to 'https://api.example.com'.
-
-[ Hint ]
-Check your internet connection or verify if the server is reachable.
-
-[ Suggestion ]
-Since you are downloading a file to disk, you can attempt to pick up where you left off by adding the --resume flag.
+nurl: error: network connection reset or interrupted during the request to 'https://api.example.com'
+      hint: check your internet connection or verify if the server is reachable
+      hint: since you are downloading a file to disk, you can attempt to pick up where you left off by adding the --resume flag
 ```
 
 ---
@@ -172,10 +167,12 @@ nurl resolve httpbin.org
 
 `nurl` is built as an exclusive, highly-optimized **HTTP/1.1** client. 
 
-By focusing on a rock-solid, manual implementation of the HTTP/1.1 state machine, `nurl` ensures maximum predictability and speed for CLI-based transfers without the overhead and complexity of binary framing libraries. 
+By focusing on a rock-solid, manual implementation of the HTTP/1.1 state machine combined with a high-performance buffered I/O system, `nurl` ensures maximum predictability and speed for CLI-based transfers.
 
-*   **HTTP/1.1**: The core engine, supporting keep-alive, chunked transfers, and byte-range resumes.
-*   **TLS 1.2/1.3**: Fully supported via OpenSSL with automatic ALPN negotiation for `http/1.1`.
+*   **Buffered I/O (8KB)**: Uses a unified `NurlStream` abstraction for both raw TCP and TLS, drastically reducing syscall overhead and improving throughput (especially during encrypted transfers).
+*   **HTTP/1.1**: The core engine, supporting keep-alive connection pooling, chunked transfers, and byte-range resumes.
+*   **TLS 1.2/1.3**: Fully supported via OpenSSL with automatic ALPN negotiation.
+*   **Modular Pipeline**: Connections are orchestrated in distinct stages (DNS -> TCP -> Proxy -> TLS Handshake), ensuring that failures are accurately diagnosed at the correct layer.
 
 
 ---

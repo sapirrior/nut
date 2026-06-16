@@ -19,8 +19,8 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        nurl_diag_block("Error", "Malformed URL '%s' provided for OPTIONS request.", url);
-        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
+        nurl_diag_err("malformed URL '%s' provided for OPTIONS request.", url);
+        nurl_diag_hint("ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 
@@ -60,6 +60,14 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
         return NURL_ERR_TLS;
+    }
+
+    NurlStream *stream = nurl_stream_new(sock_fd, tls);
+    if (!stream) {
+        nurl_tls_free(tls);
+        nurl_net_close(sock_fd);
+        free(scheme); free(host); free(path);
+        return NURL_ERR_OOM;
     }
 
     size_t extra_hdr_cap = 1024;
@@ -145,7 +153,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     }
 
     nurl_http_response_t *res = NULL;
-    nurl_err_t exec_err = nurl_http_request(tls, "OPTIONS", path, host, extra_hdr, NULL, 0, NULL, 0, NULL, false, true, 0, &res);
+    nurl_err_t exec_err = nurl_http_request(stream, "OPTIONS", path, host, extra_hdr, NULL, 0, NULL, 0, NULL, false, true, 0, NULL, NULL, &res);
     free(extra_hdr);
 
     if (exec_err != NURL_OK) {
@@ -154,6 +162,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         }
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
+        nurl_stream_free(stream);
         free(scheme); free(host); free(path);
         return exec_err;
     }
@@ -186,6 +195,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
 
     nurl_tls_free(tls);
     nurl_net_close(sock_fd);
+    nurl_stream_free(stream);
     free(scheme); free(host); free(path);
 
     int ret_code = NURL_OK;

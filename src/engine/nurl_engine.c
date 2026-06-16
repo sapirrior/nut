@@ -62,23 +62,30 @@ int nurl_engine_execute_request(
 
         int sock_fd = -1;
         nurl_tls_t *tls = NULL;
+        NurlStream *stream = NULL;
+        nurl_err_t conn_err = NURL_OK;
 
         if (req->pool) {
-            if (nurl_pool_acquire(req->pool, host, port, req, &sock_fd, &tls) != 0) {
+            nurl_err_t acquire_err = nurl_pool_acquire(req->pool, host, port, req, &stream);
+            if (acquire_err != NURL_OK) {
                 free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_NETWORK;
+                return acquire_err;
             }
+            tls = stream->tls;
+            sock_fd = stream->fd;
         } else {
-            sock_fd = nurl_net_connect_proxy(host, port, req->proxy, req->proxy_user, req->no_proxy);
+            // Stage 1: Connect (TCP + Proxy Tunneling)
+            sock_fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, &conn_err);
             if (sock_fd < 0) {
                 free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_NETWORK;
+                return conn_err;
             }
 
             if (req->timeout_sec > 0) {
                 nurl_net_set_timeout(sock_fd, req->timeout_sec);
             }
 
+            // Stage 2: TLS Creation
             tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
             if (!tls) {
                 nurl_net_close(sock_fd);
@@ -86,18 +93,32 @@ int nurl_engine_execute_request(
                 return NURL_ERR_TLS;
             }
 
+            // Stage 3: TLS Handshake
             if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
                 nurl_tls_free(tls);
                 nurl_net_close(sock_fd);
                 free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_TLS;
+                return NURL_ERR_TLS_HANDSHAKE;
+            }
+
+            stream = nurl_stream_new(sock_fd, tls);
+            if (!stream) {
+                nurl_tls_free(tls);
+                nurl_net_close(sock_fd);
+                free(scheme); free(host); free(path); free(current_url);
+                return NURL_ERR_OOM;
             }
         }
 
         NurlHeaderMap *temp_hdrs = nurl_headermap_new();
         if (!temp_hdrs) {
-            nurl_tls_free(tls);
-            nurl_net_close(sock_fd);
+            if (req->pool) {
+                nurl_pool_evict(req->pool, stream);
+            } else {
+                nurl_tls_free(tls);
+                nurl_net_close(sock_fd);
+                nurl_stream_free(stream);
+            }
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_OOM;
         }
@@ -216,15 +237,16 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        nurl_err_t exec_err = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset, &res);
+        nurl_err_t exec_err = nurl_http_request(stream, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset, req->progress_cb, req->progress_data, &res);
         free(extra_hdr);
 
         if (exec_err != NURL_OK) {
             if (req->pool) {
-                nurl_pool_evict(req->pool, sock_fd);
+                nurl_pool_evict(req->pool, stream);
             } else {
                 nurl_tls_free(tls);
                 nurl_net_close(sock_fd);
+                nurl_stream_free(stream);
             }
             free(scheme); free(host); free(path); free(current_url);
             return exec_err;
@@ -369,10 +391,11 @@ int nurl_engine_execute_request(
             if (redir_url) {
                 nurl_http_response_free(res);
                 if (req->pool) {
-                    nurl_pool_release(req->pool, host, port, sock_fd, tls);
+                    nurl_pool_release(req->pool, host, port, stream);
                 } else {
                     nurl_tls_free(tls);
                     nurl_net_close(sock_fd);
+                    nurl_stream_free(stream);
                 }
                 free(scheme); free(host); free(path);
 
@@ -406,13 +429,14 @@ int nurl_engine_execute_request(
                 keep_alive = false;
             }
             if (keep_alive) {
-                nurl_pool_release(req->pool, host, port, sock_fd, tls);
+                nurl_pool_release(req->pool, host, port, stream);
             } else {
-                nurl_pool_evict(req->pool, sock_fd);
+                nurl_pool_evict(req->pool, stream);
             }
         } else {
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
+            nurl_stream_free(stream);
         }
         free(scheme); free(host); free(path);
         break;

@@ -14,25 +14,29 @@ static unsigned long get_elapsed_ms(struct timeval start, struct timeval end) {
     return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
 }
 
-static int connect_and_handshake(const char *host, int port, const CommonArgs *common, int *out_sock, nurl_tls_t **out_tls) {
+static NurlStream *connect_and_handshake(const char *host, int port, const CommonArgs *common) {
     int fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
-    if (fd < 0) return -1;
+    if (fd < 0) return NULL;
     if (common->timeout > 0) {
         nurl_net_set_timeout(fd, common->timeout);
     }
     nurl_tls_t *t = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
     if (!t) {
         nurl_net_close(fd);
-        return -1;
+        return NULL;
     }
     if (nurl_tls_handshake(t, fd, host) != 0) {
         nurl_tls_free(t);
         nurl_net_close(fd);
-        return -1;
+        return NULL;
     }
-    *out_sock = fd;
-    *out_tls = t;
-    return 0;
+    NurlStream *s = nurl_stream_new(fd, t);
+    if (!s) {
+        nurl_tls_free(t);
+        nurl_net_close(fd);
+        return NULL;
+    }
+    return s;
 }
 
 int nurl_cmd_ping(const char *url, const CommonArgs *common) {
@@ -42,20 +46,18 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        nurl_diag_block("Error", "Malformed URL '%s' provided for ping.", url);
-        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
+        nurl_diag_err("malformed URL '%s' provided for ping.", url);
+        nurl_diag_hint("ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 
     unsigned int count = common->ping_count > 0 ? common->ping_count : 1;
     unsigned long interval = common->ping_interval > 0 ? common->ping_interval : 1000;
 
-    int sock_fd = -1;
-    nurl_tls_t *tls = NULL;
-
-    if (connect_and_handshake(host, port, common, &sock_fd, &tls) != 0) {
-        nurl_diag_block("Error", "Initial TLS connection failed for '%s'.", host);
-        nurl_diag_block("Hint", "Verify the host is reachable and the certificate is valid, or use --no-verify.");
+    NurlStream *stream = connect_and_handshake(host, port, common);
+    if (!stream) {
+        nurl_diag_err("initial TLS connection failed for '%s'.", host);
+        nurl_diag_hint("verify the host is reachable and the certificate is valid, or use --no-verify.");
         free(scheme); free(host); free(path);
         return NURL_ERR_TLS;
     }
@@ -66,8 +68,9 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
 
     unsigned long *latencies = malloc(sizeof(unsigned long) * count);
     if (!latencies) {
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
+        nurl_tls_free(stream->tls);
+        nurl_net_close(stream->fd);
+        nurl_stream_free(stream);
         free(scheme); free(host); free(path);
         return NURL_ERR_GENERIC;
     }
@@ -85,7 +88,7 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
 
         while (1) {
             gettimeofday(&start, NULL);
-            nurl_err_t err = nurl_http_request(tls, "HEAD", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0, &res);
+            nurl_err_t err = nurl_http_request(stream, "HEAD", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0, NULL, NULL, &res);
             gettimeofday(&end, NULL);
 
             if (err == NURL_OK && res && res->status_code == 405) {
@@ -93,18 +96,18 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
                 nurl_http_response_free(res);
                 res = NULL;
                 gettimeofday(&start, NULL);
-                err = nurl_http_request(tls, "GET", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0, &res);
+                err = nurl_http_request(stream, "GET", path, host, "Connection: keep-alive\r\n", NULL, 0, NULL, 0, NULL, false, true, 0, NULL, NULL, &res);
                 gettimeofday(&end, NULL);
             }
 
             if (err != NURL_OK) {
                 // Connection might have been closed by server (keep-alive timeout). Try to reconnect once.
                 if (!reconnected) {
-                    nurl_tls_free(tls);
-                    nurl_net_close(sock_fd);
-                    sock_fd = -1;
-                    tls = NULL;
-                    if (connect_and_handshake(host, port, common, &sock_fd, &tls) == 0) {
+                    nurl_tls_free(stream->tls);
+                    nurl_net_close(stream->fd);
+                    nurl_stream_free(stream);
+                    stream = connect_and_handshake(host, port, common);
+                    if (stream) {
                         reconnected = true;
                         continue;
                     }
@@ -128,8 +131,11 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
         }
     }
 
-    nurl_tls_free(tls);
-    nurl_net_close(sock_fd);
+    if (stream) {
+        nurl_tls_free(stream->tls);
+        nurl_net_close(stream->fd);
+        nurl_stream_free(stream);
+    }
     free(scheme); free(host); free(path);
 
     if (count > 1 && success_count > 0 && !common->silent) {

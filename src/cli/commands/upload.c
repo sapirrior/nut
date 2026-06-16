@@ -13,19 +13,22 @@
 #include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <ctype.h>
+
+#include "nurl_progress.h"
 
 int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!common->upload_file) {
-        nurl_diag_block("Error", "No upload file specified.");
-        nurl_diag_block("Hint", "Use the --upload flag followed by the path to the file you wish to send.");
+        nurl_diag_err("no upload file specified.");
+        nurl_diag_hint("use the --upload flag followed by the path to the file you wish to send.");
         return NURL_ERR_GENERIC;
     }
 
     struct stat st;
     if (stat(common->upload_file, &st) != 0 || !S_ISREG(st.st_mode)) {
-        nurl_diag_block("Error", "Could not read local upload file '%s'.", common->upload_file);
-        nurl_diag_block("Hint", "Ensure the file exists and you have proper read permissions.");
+        nurl_diag_err("could not read local upload file '%s'.", common->upload_file);
+        nurl_diag_hint("ensure the file exists and you have proper read permissions.");
         return NURL_ERR_WRITE;
     }
     long fsize = st.st_size;
@@ -129,6 +132,16 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     }
 
     nurl_request_from_args(req, "POST", url, common);
+
+    NurlProgressCtx p_ctx;
+    if (common->progress) {
+        p_ctx.resume_offset = 0;
+        p_ctx.silent = common->silent;
+        gettimeofday(&p_ctx.start_time, NULL);
+        p_ctx.last_update = p_ctx.start_time;
+        req->progress_cb = nurl_progress_update;
+        req->progress_data = &p_ctx;
+    }
     
     char content_type[128];
     snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);

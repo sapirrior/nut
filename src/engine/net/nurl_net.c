@@ -39,6 +39,10 @@ void nurl_net_cleanup(void) {
 }
 
 int nurl_net_connect(const char *hostname, int port) {
+    return nurl_net_connect_ex(hostname, port, NULL);
+}
+
+int nurl_net_connect_ex(const char *hostname, int port, nurl_err_t *out_err) {
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
@@ -53,10 +57,13 @@ int nurl_net_connect(const char *hostname, int port) {
 
     int s = getaddrinfo(hostname, port_str, &hints, &result);
     if (s != 0) {
+        if (out_err) *out_err = NURL_ERR_RESOLVE;
         return -1;
     }
 
     int socket_fd = -1;
+    nurl_err_t last_err = NURL_ERR_CONNECT;
+
     for (rp = result; rp != NULL; rp = rp->ai_next) {
 #ifdef _WIN32
         socket_fd = (int)socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
@@ -68,6 +75,7 @@ int nurl_net_connect(const char *hostname, int port) {
         }
 
         if (connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+            last_err = NURL_OK;
             break; /* Connected successfully */
         }
 
@@ -76,6 +84,7 @@ int nurl_net_connect(const char *hostname, int port) {
     }
 
     freeaddrinfo(result);
+    if (socket_fd == -1 && out_err) *out_err = last_err;
     return socket_fd;
 }
 
@@ -114,6 +123,14 @@ int nurl_net_set_timeout(int socket_fd, unsigned long seconds) {
 int nurl_net_connect_proxy(
     const char *host, int port,
     const char *proxy, const char *proxy_user, const char *no_proxy
+) {
+    return nurl_net_connect_proxy_ex(host, port, proxy, proxy_user, no_proxy, NULL);
+}
+
+int nurl_net_connect_proxy_ex(
+    const char *host, int port,
+    const char *proxy, const char *proxy_user, const char *no_proxy,
+    nurl_err_t *out_err
 ) {
     bool use_proxy = false;
     if (proxy && strlen(proxy) > 0) {
@@ -158,7 +175,7 @@ int nurl_net_connect_proxy(
     }
 
     if (!use_proxy) {
-        return nurl_net_connect(host, port);
+        return nurl_net_connect_ex(host, port, out_err);
     }
 
     // Parse proxy string
@@ -183,13 +200,15 @@ int nurl_net_connect_proxy(
     free(proxy_path);
 
     if (!proxy_host) {
+        if (out_err) *out_err = NURL_ERR_INVALID_URL;
         return -1;
     }
 
-    int socket_fd = nurl_net_connect(proxy_host, proxy_port);
+    int socket_fd = nurl_net_connect_ex(proxy_host, proxy_port, out_err);
     free(proxy_host);
 
     if (socket_fd < 0) {
+        // out_err already set by nurl_net_connect_ex
         return -1;
     }
 
@@ -235,6 +254,7 @@ int nurl_net_connect_proxy(
     }
 
     if (socket_write(socket_fd, connect_req, req_len) <= 0) {
+        if (out_err) *out_err = NURL_ERR_NETWORK;
         socket_close(socket_fd);
         return -1;
     }
@@ -254,6 +274,7 @@ int nurl_net_connect_proxy(
 
     // Verify 2xx response
     if (strstr(resp_buf, " 200") == NULL && strstr(resp_buf, " 201") == NULL && strstr(resp_buf, " 204") == NULL) {
+        if (out_err) *out_err = NURL_ERR_PROXY;
         socket_close(socket_fd);
         return -1;
     }

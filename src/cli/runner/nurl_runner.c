@@ -32,7 +32,7 @@ int nurl_runner_execute(const char *command, const char *url, const CommonArgs *
         return nurl_cmd_inspect(url, common);
     }
 
-    nurl_diag_block("Error", "Command '%s' is not supported by nurl.", command);
-    nurl_diag_block("Hint", "Supported commands include: get, post, put, delete, head, patch, options, download, upload, inspect, ping, resolve.");
+    nurl_diag_err("command '%s' is not supported by nurl.", command);
+    nurl_diag_hint("supported commands include: get, post, put, delete, head, patch, options, download, upload, inspect, ping, resolve.");
     return NURL_ERR_BAD_ARGS;
 }

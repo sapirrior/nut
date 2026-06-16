@@ -1,7 +1,7 @@
 #ifndef NURL_HTTP_H
 #define NURL_HTTP_H
 
-#include "nurl_tls.h"
+#include "net/nurl_stream.h"
 #include <stddef.h>
 
 typedef struct {
@@ -16,7 +16,7 @@ typedef struct {
 #include "errors/nurl_error.h"
 
 /**
- * Sends a structured HTTP/1.1 request via the provided active TLS channel.
+ * Sends a structured HTTP/1.1 request via the provided active buffered stream.
  * method: "GET", "POST", etc.
  * path: The request path and query parameters (e.g. "/json?q=1").
  * hostname: The destination Host header value.
@@ -30,7 +30,7 @@ typedef struct {
 #include <stdio.h>
 
 nurl_err_t nurl_http_request(
-    nurl_tls_t *tls,
+    NurlStream *stream,
     const char *method,
     const char *path,
     const char *hostname,
@@ -43,6 +43,8 @@ nurl_err_t nurl_http_request(
     bool show_progress,
     bool silent,
     unsigned long resume_offset,
+    nurl_progress_cb progress_cb,
+    void *progress_data,
     nurl_http_response_t **out_response
 );
 

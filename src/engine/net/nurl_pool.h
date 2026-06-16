@@ -2,7 +2,7 @@
 #define NURL_POOL_H
 
 #include "engine/request.h"
-#include "nurl_tls.h"
+#include "nurl_stream.h"
 #include <time.h>
 #include <stdbool.h>
 
@@ -11,8 +11,7 @@
 typedef struct {
     char         host[256];
     int          port;
-    int          sock_fd;
-    nurl_tls_t  *tls;
+    NurlStream  *stream;
     bool         in_use;
     time_t       last_used;   /* for idle eviction */
 } NurlPoolEntry;
@@ -25,18 +24,18 @@ NurlConnPool  *nurl_pool_create(void);
 void           nurl_pool_destroy(NurlConnPool *pool);
 
 /* Acquire a cached connection or open a new one.
- * Returns 0 on success; *sock_fd and *tls are populated. */
-int            nurl_pool_acquire(NurlConnPool *pool,
+ * Returns NURL_OK on success; *stream is populated. */
+nurl_err_t     nurl_pool_acquire(NurlConnPool *pool,
                    const char *host, int port,
                    const NurlRequest *req,
-                   int *sock_fd, nurl_tls_t **tls);
+                   NurlStream **stream);
 
 /* Return a connection to the pool after a successful keep-alive request. */
 void           nurl_pool_release(NurlConnPool *pool,
                    const char *host, int port,
-                   int sock_fd, nurl_tls_t *tls);
+                   NurlStream *stream);
 
 /* Permanently close and evict a connection (on error or Connection: close). */
-void           nurl_pool_evict(NurlConnPool *pool, int sock_fd);
+void           nurl_pool_evict(NurlConnPool *pool, NurlStream *stream);
 
 #endif /* NURL_POOL_H */

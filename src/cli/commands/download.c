@@ -15,6 +15,8 @@
 #include <sys/time.h>
 #include <ctype.h>
 
+#include "nurl_progress.h"
+
 int nurl_cmd_download(const char *url, const CommonArgs *common) {
     char *scheme = NULL;
     char *host = NULL;
@@ -22,8 +24,8 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        nurl_diag_block("Error", "Malformed URL '%s' provided for download.", url);
-        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
+        nurl_diag_err("malformed URL '%s' provided for download.", url);
+        nurl_diag_hint("ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 
@@ -68,11 +70,21 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
 
     nurl_request_from_args(req, "GET", url, common);
 
+    NurlProgressCtx p_ctx;
+    if (common->progress) {
+        p_ctx.resume_offset = 0; // Will be updated per attempt
+        p_ctx.silent = common->silent;
+        gettimeofday(&p_ctx.start_time, NULL);
+        p_ctx.last_update = p_ctx.start_time;
+        req->progress_cb = nurl_progress_update;
+        req->progress_data = &p_ctx;
+    }
+
     // Verbose notice
     if (!common->silent) {
         fprintf(stderr, "* Saving to: %s\n", filename);
         if (start_pos > 0) {
-            nurl_diag_block("Info", "Resuming download from offset: %lu", start_pos);
+            nurl_diag_hint("resuming download from offset: %lu", start_pos);
         }
     }
 
@@ -111,8 +123,8 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
             out = fopen(filename, (current_offset > 0) ? "ab" : "wb");
         }
         if (!out) {
-            nurl_diag_block("Error", "Could not open local file '%s' for writing.", filename);
-            nurl_diag_block("Hint", "Check your file permissions or verify that the directory exists.");
+            nurl_diag_err("could not open local file '%s' for writing.", filename);
+            nurl_diag_hint("check your file permissions or verify that the directory exists.");
             nurl_request_free(req);
             free(filename); free(scheme); free(host); free(path);
             return NURL_ERR_WRITE;
@@ -120,6 +132,9 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
 
         req->out = out;
         req->resume_offset = current_offset;
+        if (common->progress) {
+            p_ctx.resume_offset = current_offset;
+        }
 
         engine_err = nurl_engine_execute_request(req, &res, &effective_url);
 

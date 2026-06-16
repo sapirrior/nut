@@ -21,6 +21,8 @@ typedef struct {
     const char *filepath;
 } NurlBodyPart;
 
+typedef void (*nurl_progress_cb)(unsigned long downloaded, unsigned long total, bool finished, void *user_data);
+
 typedef struct {
     const char      *method;       /* "GET", "POST", etc. */
     const char      *url;
@@ -69,6 +71,8 @@ typedef struct {
     bool             resume;
     bool             progress;
     unsigned long    resume_offset;
+    nurl_progress_cb progress_cb;
+    void            *progress_data;
 
     /* Upload-specific */
     const char      *upload_file;

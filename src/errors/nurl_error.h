@@ -8,6 +8,10 @@ typedef enum {
     NURL_ERR_URL       = 4,   /* Malformed or unsupported URL */
     NURL_ERR_TLS       = 5,   /* TLS handshake or cert error */
     NURL_ERR_IO        = 6,   /* File read/write failed */
+    NURL_ERR_RESOLVE   = 7,   /* Hostname resolution failed */
+    NURL_ERR_CONNECT   = 8,   /* TCP connection failed */
+    NURL_ERR_PROXY     = 9,   /* Proxy connection/handshake failed */
+    NURL_ERR_TLS_HANDSHAKE = 10, /* Specific TLS handshake failure */
     NURL_ERR_TIMEOUT   = 28,  /* curl compat: operation timed out */
     NURL_ERR_HTTP_4XX  = 22,  /* curl compat: 4xx response, -f/--fail */
     NURL_ERR_HTTP_5XX  = 43,  /* curl compat: 5xx response, -f/--fail */

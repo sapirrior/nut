@@ -119,6 +119,8 @@ static void handle_write_out(const char *template, const nurl_http_response_t *r
     free(result);
 }
 
+#include "nurl_progress.h"
+
 int nurl_request_generic(const char *method, const char *url, const CommonArgs *common) {
     double start_time = nurl_utils_get_time_sec();
 
@@ -128,6 +130,16 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
     NurlRequest *req = nurl_request_new();
     if (!req) return NURL_ERR_OOM;
     nurl_request_from_args(req, method, url, common);
+
+    NurlProgressCtx p_ctx;
+    if (common->progress) {
+        p_ctx.resume_offset = 0;
+        p_ctx.silent = common->silent;
+        gettimeofday(&p_ctx.start_time, NULL);
+        p_ctx.last_update = p_ctx.start_time;
+        req->progress_cb = nurl_progress_update;
+        req->progress_data = &p_ctx;
+    }
 
     unsigned int max_retries = common->retry;
     unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;

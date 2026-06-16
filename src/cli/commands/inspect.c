@@ -14,8 +14,8 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        nurl_diag_block("Error", "Malformed URL '%s' provided for inspection.", url);
-        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
+        nurl_diag_err("malformed URL '%s' provided for inspection.", url);
+        nurl_diag_hint("ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 

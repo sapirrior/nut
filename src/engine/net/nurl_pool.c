@@ -7,50 +7,46 @@
 NurlConnPool *nurl_pool_create(void) {
     NurlConnPool *pool = calloc(1, sizeof(NurlConnPool));
     if (!pool) return NULL;
-    for (int i = 0; i < NURL_POOL_MAX; i++) {
-        pool->entries[i].sock_fd = -1;
-    }
     return pool;
 }
 
 void nurl_pool_destroy(NurlConnPool *pool) {
     if (!pool) return;
     for (int i = 0; i < NURL_POOL_MAX; i++) {
-        if (pool->entries[i].sock_fd >= 0) {
-            if (pool->entries[i].tls) {
-                nurl_tls_free(pool->entries[i].tls);
-            }
-            nurl_net_close(pool->entries[i].sock_fd);
+        if (pool->entries[i].stream) {
+            NurlStream *s = pool->entries[i].stream;
+            if (s->tls) nurl_tls_free(s->tls);
+            nurl_net_close(s->fd);
+            nurl_stream_free(s);
         }
     }
     free(pool);
 }
 
-int nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const NurlRequest *req, int *sock_fd, nurl_tls_t **tls) {
-    if (!pool) return -1;
+nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const NurlRequest *req, NurlStream **stream) {
+    if (!pool) return NURL_ERR_GENERIC;
     time_t now = time(NULL);
 
     // 1. Scan for existing warm connection
     for (int i = 0; i < NURL_POOL_MAX; i++) {
         NurlPoolEntry *e = &pool->entries[i];
-        if (e->sock_fd >= 0 && !e->in_use && e->port == port && strcmp(e->host, host) == 0) {
+        if (e->stream && !e->in_use && e->port == port && strcmp(e->host, host) == 0) {
             // Idle eviction check (e.g. 60 seconds)
             if (now - e->last_used > 60) {
                 if (req->verbose && !req->silent) {
                     fprintf(stderr, "* Connection pool: evicting idle connection to %s:%d (idle %lds)\n", e->host, e->port, (long)(now - e->last_used));
                 }
-                if (e->tls) nurl_tls_free(e->tls);
-                nurl_net_close(e->sock_fd);
-                e->sock_fd = -1;
-                e->tls = NULL;
+                if (e->stream->tls) nurl_tls_free(e->stream->tls);
+                nurl_net_close(e->stream->fd);
+                nurl_stream_free(e->stream);
+                e->stream = NULL;
             } else {
                 e->in_use = true;
-                *sock_fd = e->sock_fd;
-                *tls = e->tls;
+                *stream = e->stream;
                 if (req->verbose && !req->silent) {
                     fprintf(stderr, "* Connection pool: reusing warm connection to %s:%d\n", host, port);
                 }
-                return 0;
+                return NURL_OK;
             }
         }
     }
@@ -62,7 +58,7 @@ int nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const Nurl
 
     for (int i = 0; i < NURL_POOL_MAX; i++) {
         NurlPoolEntry *e = &pool->entries[i];
-        if (e->sock_fd < 0) {
+        if (!e->stream) {
             slot = i;
             break;
         }
@@ -78,10 +74,10 @@ int nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const Nurl
             if (req->verbose && !req->silent) {
                 fprintf(stderr, "* Connection pool: pool full, evicting oldest connection to %s:%d\n", e->host, e->port);
             }
-            if (e->tls) nurl_tls_free(e->tls);
-            nurl_net_close(e->sock_fd);
-            e->sock_fd = -1;
-            e->tls = NULL;
+            if (e->stream->tls) nurl_tls_free(e->stream->tls);
+            nurl_net_close(e->stream->fd);
+            nurl_stream_free(e->stream);
+            e->stream = NULL;
             slot = oldest_slot;
         } else {
             // All slots in use
@@ -92,9 +88,10 @@ int nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const Nurl
     }
 
     // 3. Connect & handshake
-    int fd = nurl_net_connect_proxy(host, port, req->proxy, req->proxy_user, req->no_proxy);
+    nurl_err_t conn_err = NURL_OK;
+    int fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, &conn_err);
     if (fd < 0) {
-        return -1;
+        return conn_err;
     }
     if (req->timeout_sec > 0) {
         nurl_net_set_timeout(fd, req->timeout_sec);
@@ -103,17 +100,23 @@ int nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const Nurl
     nurl_tls_t *t = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
     if (!t) {
         nurl_net_close(fd);
-        return -1;
+        return NURL_ERR_TLS;
     }
 
     if (nurl_tls_handshake(t, fd, host) != 0) {
         nurl_tls_free(t);
         nurl_net_close(fd);
-        return -1;
+        return NURL_ERR_TLS_HANDSHAKE;
     }
 
-    *sock_fd = fd;
-    *tls = t;
+    NurlStream *s = nurl_stream_new(fd, t);
+    if (!s) {
+        nurl_tls_free(t);
+        nurl_net_close(fd);
+        return NURL_ERR_OOM;
+    }
+
+    *stream = s;
 
     // Save to slot if available
     if (slot >= 0) {
@@ -121,41 +124,41 @@ int nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const Nurl
         strncpy(e->host, host, sizeof(e->host) - 1);
         e->host[sizeof(e->host) - 1] = '\0';
         e->port = port;
-        e->sock_fd = fd;
-        e->tls = t;
+        e->stream = s;
         e->in_use = true;
         e->last_used = now;
     }
 
-    return 0;
+    return NURL_OK;
 }
 
-void nurl_pool_release(NurlConnPool *pool, const char *host, int port, int sock_fd, nurl_tls_t *tls) {
+void nurl_pool_release(NurlConnPool *pool, const char *host, int port, NurlStream *stream) {
     if (!pool) return;
     (void)host;
     (void)port;
     for (int i = 0; i < NURL_POOL_MAX; i++) {
         NurlPoolEntry *e = &pool->entries[i];
-        if (e->sock_fd == sock_fd) {
+        if (e->stream == stream) {
             e->in_use = false;
             e->last_used = time(NULL);
             return;
         }
     }
     // If connection was bypass, close it
-    if (tls) nurl_tls_free(tls);
-    nurl_net_close(sock_fd);
+    if (stream->tls) nurl_tls_free(stream->tls);
+    nurl_net_close(stream->fd);
+    nurl_stream_free(stream);
 }
 
-void nurl_pool_evict(NurlConnPool *pool, int sock_fd) {
+void nurl_pool_evict(NurlConnPool *pool, NurlStream *stream) {
     if (!pool) return;
     for (int i = 0; i < NURL_POOL_MAX; i++) {
         NurlPoolEntry *e = &pool->entries[i];
-        if (e->sock_fd == sock_fd) {
-            if (e->tls) nurl_tls_free(e->tls);
-            nurl_net_close(e->sock_fd);
-            e->sock_fd = -1;
-            e->tls = NULL;
+        if (e->stream == stream) {
+            if (e->stream->tls) nurl_tls_free(e->stream->tls);
+            nurl_net_close(e->stream->fd);
+            nurl_stream_free(e->stream);
+            e->stream = NULL;
             e->in_use = false;
             return;
         }

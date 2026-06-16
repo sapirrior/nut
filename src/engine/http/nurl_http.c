@@ -13,60 +13,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void update_progress_bar(bool show_progress, bool silent, unsigned long downloaded, unsigned long total_len, unsigned long resume_offset, struct timeval start_time, struct timeval *last_update) {
-    if (!show_progress || silent) return;
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    double elapsed_sec = (now.tv_sec - start_time.tv_sec) + (now.tv_usec - start_time.tv_usec) / 1000000.0;
-    double since_last_sec = (now.tv_sec - last_update->tv_sec) + (now.tv_usec - last_update->tv_usec) / 1000000.0;
-
-    if (since_last_sec >= 0.2 || (total_len > 0 && downloaded == total_len)) {
-        *last_update = now;
-        double speed_mb = 0.0;
-        if (elapsed_sec > 0.0) {
-            speed_mb = ((double)(downloaded - resume_offset) / (1024.0 * 1024.0)) / elapsed_sec;
-        }
-
-        if (total_len > 0) {
-            int percent = (int)(((double)downloaded / (double)total_len) * 100.0);
-            double remaining_sec = 0.0;
-            if (total_len > downloaded && speed_mb > 0.0) {
-                remaining_sec = (double)(total_len - downloaded) / (speed_mb * 1024.0 * 1024.0);
-            }
-            fprintf(stderr, "\r  %.2f MB / %.2f MB  %d%%  %.2f MB/s  %.0fs left",
-                (double)downloaded / (1024.0 * 1024.0),
-                (double)total_len / (1024.0 * 1024.0),
-                percent,
-                speed_mb,
-                remaining_sec);
-        } else {
-            fprintf(stderr, "\r  %.2f MB / Unknown  %.2f MB/s",
-                (double)downloaded / (1024.0 * 1024.0),
-                speed_mb);
-        }
-        fflush(stderr);
-    }
-}
-
-static int tls_read_line(nurl_tls_t *tls, char *buf, size_t max_len) {
-    size_t len = 0;
-    while (len < max_len - 1) {
-        char c;
-        int n = nurl_tls_read(tls, &c, 1);
-        if (n <= 0) {
-            break;
-        }
-        buf[len++] = c;
-        if (c == '\n') {
-            break;
-        }
-    }
-    buf[len] = '\0';
-    return (int)len;
-}
-
 nurl_err_t nurl_http_request(
-    nurl_tls_t *tls,
+    NurlStream *stream,
     const char *method,
     const char *path,
     const char *hostname,
@@ -79,8 +27,12 @@ nurl_err_t nurl_http_request(
     bool show_progress,
     bool silent,
     unsigned long resume_offset,
+    nurl_progress_cb progress_cb,
+    void *progress_data,
     nurl_http_response_t **out_response
 ) {
+    (void)show_progress;
+    (void)silent;
     if (out_response) *out_response = NULL;
 
     size_t total_body_len = body_len;
@@ -154,7 +106,7 @@ nurl_err_t nurl_http_request(
     written += snprintf(req_buf + written, req_capacity - written, "\r\n");
 
     // Send HTTP Headers
-    if (nurl_tls_write(tls, req_buf, written) <= 0) {
+    if (nurl_stream_write(stream, req_buf, written) <= 0) {
         free(req_buf);
         return NURL_ERR_NETWORK;
     }
@@ -166,7 +118,7 @@ nurl_err_t nurl_http_request(
             NurlBodyPart *part = &body_parts[i];
             if (part->type == NURL_BODY_PART_MEM) {
                 if (part->data && part->len > 0) {
-                    if (nurl_tls_write(tls, part->data, part->len) <= 0) {
+                    if (nurl_stream_write(stream, part->data, part->len) <= 0) {
                         return NURL_ERR_NETWORK;
                     }
                 }
@@ -179,7 +131,7 @@ nurl_err_t nurl_http_request(
                     char send_buf[65536];
                     size_t r;
                     while ((r = fread(send_buf, 1, sizeof(send_buf), bf)) > 0) {
-                        if (nurl_tls_write(tls, (const unsigned char *)send_buf, r) <= 0) {
+                        if (nurl_stream_write(stream, send_buf, r) <= 0) {
                             fclose(bf);
                             return NURL_ERR_NETWORK;
                         }
@@ -189,68 +141,37 @@ nurl_err_t nurl_http_request(
             }
         }
     } else if (body && body_len > 0) {
-        if (nurl_tls_write(tls, body, body_len) <= 0) {
+        if (nurl_stream_write(stream, body, body_len) <= 0) {
             return NURL_ERR_NETWORK;
         }
     }
 
     // 2. Read response headers
-    size_t header_capacity = 8192;
-    size_t header_length = 0;
-    char *headers_buf = malloc(header_capacity);
-    if (!headers_buf) {
-        return NURL_ERR_OOM;
-    }
-
-    bool found_boundary = false;
-    while (header_length < header_capacity - 1) {
-        char c;
-        int n = nurl_tls_read(tls, &c, 1);
-        if (n <= 0) {
-            break;
-        }
-        headers_buf[header_length++] = c;
-        headers_buf[header_length] = '\0';
-
-        if (header_length >= 4 &&
-            headers_buf[header_length - 4] == '\r' &&
-            headers_buf[header_length - 3] == '\n' &&
-            headers_buf[header_length - 2] == '\r' &&
-            headers_buf[header_length - 1] == '\n') {
-            found_boundary = true;
-            break;
-        }
-    }
-
-    if (!found_boundary) {
-        free(headers_buf);
-        return NURL_ERR_NETWORK;
-    }
-
     nurl_http_response_t *res = calloc(1, sizeof(nurl_http_response_t));
-    if (!res) {
-        free(headers_buf);
-        return NURL_ERR_OOM;
-    }
+    if (!res) return NURL_ERR_OOM;
 
-    // Split headers string into lines
-    headers_buf[header_length - 4] = '\0';
+    char line_buf[8192];
+    int line_len;
 
-    char *line = strtok(headers_buf, "\r\n");
-    if (!line) {
+    // Read Status Line
+    line_len = nurl_stream_read_line(stream, line_buf, sizeof(line_buf));
+    if (line_len <= 0) {
         nurl_http_response_free(res);
-        free(headers_buf);
         return NURL_ERR_NETWORK;
     }
 
     // Parse status line: e.g. "HTTP/1.1 200 OK"
-    char *version = strchr(line, ' ');
+    char *version = strchr(line_buf, ' ');
     if (version) {
         version++;
         res->status_code = atoi(version);
         char *status_text_start = strchr(version, ' ');
         if (status_text_start) {
             status_text_start++;
+            // Trim \r\n
+            char *p = status_text_start;
+            while (*p && *p != '\r' && *p != '\n') p++;
+            *p = '\0';
             res->status_text = strdup(status_text_start);
         } else {
             res->status_text = strdup("Unknown");
@@ -262,36 +183,44 @@ nurl_err_t nurl_http_request(
 
     if (!res->status_text) {
         nurl_http_response_free(res);
-        free(headers_buf);
         return NURL_ERR_OOM;
     }
 
-    // Parse all other header lines
+    // Read headers until empty line
     bool is_chunked = false;
     size_t content_len = 0;
     unsigned long total_len = 0;
 
-    while ((line = strtok(NULL, "\r\n")) != NULL) {
+    while ((line_len = nurl_stream_read_line(stream, line_buf, sizeof(line_buf))) > 0) {
+        if (line_len <= 2 && (line_buf[0] == '\n' || (line_buf[0] == '\r' && line_buf[1] == '\n'))) {
+            break; // End of headers
+        }
+
+        // Trim trailing CRLF for strdup
+        char *p = line_buf + line_len - 1;
+        while (p >= line_buf && (*p == '\r' || *p == '\n')) {
+            *p = '\0';
+            p--;
+        }
+
         char **temp = realloc(res->headers, sizeof(char *) * (res->header_count + 1));
         if (!temp) {
             nurl_http_response_free(res);
-            free(headers_buf);
             return NURL_ERR_OOM;
         }
         res->headers = temp;
-        res->headers[res->header_count] = strdup(line);
+        res->headers[res->header_count] = strdup(line_buf);
         if (!res->headers[res->header_count]) {
             nurl_http_response_free(res);
-            free(headers_buf);
             return NURL_ERR_OOM;
         }
         res->header_count++;
 
         // Detect chunked or Content-Length
-        char *colon = strchr(line, ':');
+        char *colon = strchr(line_buf, ':');
         if (colon) {
             *colon = '\0';
-            char *key = line;
+            char *key = line_buf;
             char *val = colon + 1;
             while (isspace((unsigned char)*val)) val++;
             if (strcasecmp(key, "Transfer-Encoding") == 0 && strcasecmp(val, "chunked") == 0) {
@@ -304,10 +233,8 @@ nurl_err_t nurl_http_request(
                     total_len = strtoul(slash + 1, NULL, 10);
                 }
             }
-            *colon = ':'; // Restore
         }
     }
-    free(headers_buf);
 
     if (strcasecmp(method, "HEAD") == 0) {
         if (out_response) *out_response = res;
@@ -320,9 +247,6 @@ nurl_err_t nurl_http_request(
         total_len_computed = is_resume ? (content_len + resume_offset) : content_len;
     }
 
-    struct timeval start_time, last_update;
-    gettimeofday(&start_time, NULL);
-    last_update = start_time;
     unsigned long downloaded = resume_offset;
 
     // 3. Read body from socket (either streaming to body_out or accumulating in memory)
@@ -339,17 +263,17 @@ nurl_err_t nurl_http_request(
         }
 
         while (1) {
-            char line_buf[256];
-            int line_len = tls_read_line(tls, line_buf, sizeof(line_buf));
-            if (line_len <= 0) {
+            char chunk_size_buf[128];
+            int size_line_len = nurl_stream_read_line(stream, chunk_size_buf, sizeof(chunk_size_buf));
+            if (size_line_len <= 0) {
                 break; // Premature EOF
             }
 
-            unsigned long chunk_size = strtoul(line_buf, NULL, 16);
+            unsigned long chunk_size = strtoul(chunk_size_buf, NULL, 16);
             if (chunk_size == 0) {
                 // Consume trailing CRLF of the last chunk size 0
                 char dummy[2];
-                nurl_tls_read(tls, dummy, 2);
+                nurl_stream_read_exact(stream, dummy, 2);
                 break; // Finished
             }
 
@@ -358,7 +282,7 @@ nurl_err_t nurl_http_request(
                 char chunk_buf[4096];
                 size_t to_read = chunk_size - read_chunk;
                 if (to_read > sizeof(chunk_buf)) to_read = sizeof(chunk_buf);
-                int n = nurl_tls_read(tls, chunk_buf, (int)to_read);
+                int n = nurl_stream_read(stream, chunk_buf, to_read);
                 if (n <= 0) {
                     if (body_buf) free(body_buf);
                     nurl_http_response_free(res);
@@ -383,12 +307,12 @@ nurl_err_t nurl_http_request(
                 body_len += n;
                 read_chunk += n;
                 downloaded += n;
-                update_progress_bar(show_progress, silent, downloaded, total_len_computed, resume_offset, start_time, &last_update);
+                if (progress_cb) progress_cb(downloaded, total_len_computed, false, progress_data);
             }
 
             // Consume trailing CRLF of this chunk
             char dummy[2];
-            nurl_tls_read(tls, dummy, 2);
+            nurl_stream_read_exact(stream, dummy, 2);
         }
 
         if (!body_out && body_buf) {
@@ -411,7 +335,7 @@ nurl_err_t nurl_http_request(
             char chunk_buf[4096];
             size_t to_read = content_len - body_len;
             if (to_read > sizeof(chunk_buf)) to_read = sizeof(chunk_buf);
-            int n = nurl_tls_read(tls, chunk_buf, (int)to_read);
+            int n = nurl_stream_read(stream, chunk_buf, to_read);
             if (n <= 0) break; // Premature EOF
 
             if (body_out) {
@@ -421,7 +345,7 @@ nurl_err_t nurl_http_request(
             }
             body_len += n;
             downloaded += n;
-            update_progress_bar(show_progress, silent, downloaded, total_len_computed, resume_offset, start_time, &last_update);
+            if (progress_cb) progress_cb(downloaded, total_len_computed, false, progress_data);
         }
 
         if (!body_out && body_buf) {
@@ -444,7 +368,7 @@ nurl_err_t nurl_http_request(
 
         char chunk_buf[4096];
         int n;
-        while ((n = nurl_tls_read(tls, chunk_buf, sizeof(chunk_buf))) > 0) {
+        while ((n = nurl_stream_read(stream, chunk_buf, sizeof(chunk_buf))) > 0) {
             if (body_out) {
                 fwrite(chunk_buf, 1, n, body_out);
             } else {
@@ -462,7 +386,7 @@ nurl_err_t nurl_http_request(
             }
             body_len += n;
             downloaded += n;
-            update_progress_bar(show_progress, silent, downloaded, total_len_computed, resume_offset, start_time, &last_update);
+            if (progress_cb) progress_cb(downloaded, total_len_computed, false, progress_data);
         }
 
         if (!body_out && body_buf) {
@@ -471,6 +395,8 @@ nurl_err_t nurl_http_request(
             res->body_len = body_len;
         }
     }
+
+    if (progress_cb) progress_cb(downloaded, total_len_computed, true, progress_data);
 
     if (show_progress && !silent) {
         fprintf(stderr, "\n");

@@ -41,8 +41,8 @@ int nurl_cmd_resolve(const char *url_or_host, const CommonArgs *common) {
 
     int s = getaddrinfo(target_host, NULL, &hints, &result);
     if (s != 0) {
-        nurl_diag_block("Error", "DNS resolution failed for '%s'.", target_host);
-        nurl_diag_block("Hint", "Check your internet connection or verify the hostname is correct.");
+        nurl_diag_err("DNS resolution failed for '%s'.", target_host);
+        nurl_diag_hint("check your internet connection or verify the hostname is correct.");
         free(target_host);
         free(scheme); free(host); free(path);
         return 2;

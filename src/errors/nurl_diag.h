@@ -2,10 +2,15 @@
 #define NURL_DIAG_H
 
 /**
- * Emits a standardized diagnostic block to stderr.
- * block_type: The tag to display (e.g., "Error", "Hint", "Suggestion").
- * fmt: The formatted message.
+ * Emits a standardized error message to stderr in Unix style.
+ * nurl: error: <msg>
  */
-void nurl_diag_block(const char *block_type, const char *fmt, ...);
+void nurl_diag_err(const char *fmt, ...);
+
+/**
+ * Emits a standardized hint message to stderr.
+ *       hint: <msg>
+ */
+void nurl_diag_hint(const char *fmt, ...);
 
 #endif /* NURL_DIAG_H */

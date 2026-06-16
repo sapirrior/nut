@@ -181,7 +181,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->user) free(args->user);
                 args->user = strdup(optarg);
                 if (!args->user) {
-                    nurl_diag_block("Error", "Out of memory while processing the --user argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --user argument.");
                     return -1;
                 }
                 break;
@@ -189,7 +190,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->bearer) free(args->bearer);
                 args->bearer = strdup(optarg);
                 if (!args->bearer) {
-                    nurl_diag_block("Error", "Out of memory while processing the --bearer argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --bearer argument.");
                     return -1;
                 }
                 break;
@@ -197,7 +199,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->token) free(args->token);
                 args->token = strdup(optarg);
                 if (!args->token) {
-                    nurl_diag_block("Error", "Out of memory while processing the --token argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --token argument.");
                     return -1;
                 }
                 break;
@@ -208,7 +211,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->data) free(args->data);
                 args->data = strdup(optarg);
                 if (!args->data) {
-                    nurl_diag_block("Error", "Out of memory while processing the --data argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --data argument.");
                     return -1;
                 }
                 args->data_len = strlen(optarg);
@@ -223,7 +227,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->cacert) free(args->cacert);
                 args->cacert = strdup(optarg);
                 if (!args->cacert) {
-                    nurl_diag_block("Error", "Out of memory while processing the --cacert argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --cacert argument.");
                     return -1;
                 }
                 break;
@@ -246,13 +251,15 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 }
                 char **temp = realloc(args->header, sizeof(char *) * (args->header_count + 1));
                 if (!temp) {
-                    nurl_diag_block("Error", "Out of memory while processing the --header argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --header argument.");
                     return -1;
                 }
                 args->header = temp;
                 args->header[args->header_count] = strdup(optarg);
                 if (!args->header[args->header_count]) {
-                    nurl_diag_block("Error", "Out of memory while processing the --header argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --header argument.");
                     return -1;
                 }
                 args->header_count++;
@@ -262,7 +269,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->output) free(args->output);
                 args->output = strdup(optarg);
                 if (!args->output) {
-                    nurl_diag_block("Error", "Out of memory while processing the --output argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --output argument.");
                     return -1;
                 }
                 break;
@@ -349,7 +357,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->write_out) free(args->write_out);
                 args->write_out = strdup(optarg);
                 if (!args->write_out) {
-                    nurl_diag_block("Error", "Out of memory while processing the --write-out argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --write-out argument.");
                     return -1;
                 }
                 break;
@@ -357,7 +366,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->cert) free(args->cert);
                 args->cert = strdup(optarg);
                 if (!args->cert) {
-                    nurl_diag_block("Error", "Out of memory while processing the --cert argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --cert argument.");
                     return -1;
                 }
                 break;
@@ -365,7 +375,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->key) free(args->key);
                 args->key = strdup(optarg);
                 if (!args->key) {
-                    nurl_diag_block("Error", "Out of memory while processing the --key argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --key argument.");
                     return -1;
                 }
                 break;
@@ -373,7 +384,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->proxy) free(args->proxy);
                 args->proxy = strdup(optarg);
                 if (!args->proxy) {
-                    nurl_diag_block("Error", "Out of memory while processing the --proxy argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --proxy argument.");
                     return -1;
                 }
                 break;
@@ -381,7 +393,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->proxy_user) free(args->proxy_user);
                 args->proxy_user = strdup(optarg);
                 if (!args->proxy_user) {
-                    nurl_diag_block("Error", "Out of memory while processing the --proxy-user argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --proxy-user argument.");
                     return -1;
                 }
                 break;
@@ -389,7 +402,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->no_proxy) free(args->no_proxy);
                 args->no_proxy = strdup(optarg);
                 if (!args->no_proxy) {
-                    nurl_diag_block("Error", "Out of memory while processing the --no-proxy argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --no-proxy argument.");
                     return -1;
                 }
                 break;
@@ -397,7 +411,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->user_agent) free(args->user_agent);
                 args->user_agent = strdup(optarg);
                 if (!args->user_agent) {
-                    nurl_diag_block("Error", "Out of memory while processing the --user-agent argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --user-agent argument.");
                     return -1;
                 }
                 break;
@@ -433,7 +448,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->referer) free(args->referer);
                 args->referer = strdup(optarg);
                 if (!args->referer) {
-                    nurl_diag_block("Error", "Out of memory while processing the --referer argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --referer argument.");
                     return -1;
                 }
                 break;
@@ -450,7 +466,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->method) free(args->method);
                 args->method = strdup(optarg);
                 if (!args->method) {
-                    nurl_diag_block("Error", "Out of memory while processing the --request argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --request argument.");
                     return -1;
                 }
                 break;
@@ -458,7 +475,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                 if (args->upload_file) free(args->upload_file);
                 args->upload_file = strdup(optarg);
                 if (!args->upload_file) {
-                    nurl_diag_block("Error", "Out of memory while processing the --upload argument.");
+                    nurl_diag_err(
+ "Out of memory while processing the --upload argument.");
                     return -1;
                 }
                 break;
@@ -468,8 +486,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 'h':
                 return -1; // Help requested
             default:
-                nurl_diag_block("Error", "Option '%s' is not recognized by nurl.", argv[optind - 1]);
-                nurl_diag_block("Hint", "Run 'nurl --help' to see a list of all available options.");
+                nurl_diag_err("option '%s' is not recognized by nurl.", argv[optind - 1]);
+                nurl_diag_hint("run 'nurl --help' to see a list of all available options.");
                 return -1;
         }
     }
