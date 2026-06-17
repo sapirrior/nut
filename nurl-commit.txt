@@ -1,0 +1,41 @@
+feat: release version 0.8.0 with stabilized architecture and testing suite
+
+This commit represents a major milestone in the stabilization and architectural
+refinement of the nurl project, successfully fulfilling the goals of the
+Battle-Tested Stability Plan.
+
+Core Architectural Changes:
+- Replaced global connection pooling state with an explicit NurlCtx object,
+  passing context down from main.c through the dispatcher to the engine.
+- Completely dismantled nurl_request_build.c and request.c, replacing
+  them with nurl_engine_request.c, nurl_engine_types.h, and improved
+  builder logic directly in nurl_request.c.
+- Restructured nurl_http.h and nurl_engine_request.h to cleanly eliminate
+  circular dependencies that broke the build.
+- Safely implemented multipart form-data uploading via nurl_multipart.c.
+
+Resilience & Error Handling:
+- Refined the retry logic (nurl_retry.c) to properly handle NURL_ERR_TIMEOUT
+  and network resets, allowing automatic backoff without crashing.
+- Aligned internal HTTP error codes explicitly with curl exit codes:
+  - NURL_ERR_HTTP_4XX maps to 22
+  - NURL_ERR_HTTP_5XX maps to 22 (via exit handler)
+  - Timeout correctly returns 28.
+- Added explicit errno.h missing includes, fixing macro resolution errors.
+- Enhanced nurl_diag.h diagnostics and safely implemented nurl_diag_oom
+  to handle memory starvation reliably without malloc.
+
+Testing & Tooling:
+- Added a standalone C-based unit testing framework (tests/test_runner.h).
+- Implemented core unit tests for URL parsing and Header serialization.
+- Created tests/integration.sh, a bash-driven integration test suite mocking
+  endpoints (jsonplaceholder, badssl) for GET, POST, redirect, and TLS failures.
+- Updated Makefile with dynamic VERSION tracking, a test target linking
+  into the new test directory, and new sanitization targets (asan, debug,
+  and memcheck).
+
+Miscellaneous:
+- Deleted the completed plan.md as all strategic phases were executed.
+- Updated .gitignore to mask build artifacts and the new nurl.exe.
+- Updated README.md to document the new Makefile targets, the revised
+  project directory tree, and added advanced CLI flags.

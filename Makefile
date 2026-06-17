@@ -1,5 +1,5 @@
 CC      = gcc
-VERSION ?= 0.7.0
+VERSION = $(shell cat VERSION)
 CFLAGS  = -std=c11 -Wall -Wextra -Os -ffunction-sections -fdata-sections \
           -fno-ident -D_GNU_SOURCE -DNURL_VERSION=\"$(VERSION)\" \
           -Isrc -Isrc/cli -Isrc/cli/parser -Isrc/cli/runner \
@@ -17,7 +17,12 @@ ifeq ($(WINDOWS),1)
   TARGET   = nurl.exe
 endif
 
+PREFIX ?= /usr/local
+
 all: $(TARGET)
+
+debug: CFLAGS += -g -O0 -DDEBUG
+debug: all
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) -o $@
@@ -26,7 +31,31 @@ build/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+install: $(TARGET)
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(TARGET)
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/$(TARGET)
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
+
 clean:
 	rm -rf build $(TARGET)
+	$(MAKE) -C tests clean
 
-.PHONY: all clean
+test: $(TARGET)
+	$(MAKE) -C tests test
+
+debug: CFLAGS = -std=c11 -Wall -Wextra -g3 -O0 -D_GNU_SOURCE -DNURL_VERSION=\"$(VERSION)-debug\" -Isrc -Isrc/cli -Isrc/cli/parser -Isrc/cli/runner -Isrc/engine -Isrc/engine/net -Isrc/engine/tls -Isrc/engine/http -Isrc/engine/utils -Isrc/compat -Isrc/errors
+debug: LDFLAGS = -lssl -lcrypto -lpthread -ldl -lz
+debug: $(TARGET)
+
+asan: CC = clang
+asan: CFLAGS = -std=c11 -Wall -Wextra -g -O1 -fno-omit-frame-pointer -D_GNU_SOURCE -DNURL_VERSION=\"$(VERSION)-asan\" -Isrc -Isrc/cli -Isrc/cli/parser -Isrc/cli/runner -Isrc/engine -Isrc/engine/net -Isrc/engine/tls -Isrc/engine/http -Isrc/engine/utils -Isrc/compat -Isrc/errors -fsanitize=address,undefined
+asan: LDFLAGS = -fsanitize=address,undefined -lssl -lcrypto -lpthread -ldl -lz
+asan: clean $(TARGET)
+
+memcheck: $(TARGET)
+	valgrind --leak-check=full --error-exitcode=1 ./nurl https://jsonplaceholder.typicode.com/posts/1 -s > /dev/null
+
+.PHONY: all clean debug asan memcheck install uninstall test

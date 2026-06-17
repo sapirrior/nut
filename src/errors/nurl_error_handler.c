@@ -1,5 +1,7 @@
 #include "nurl_error_handler.h"
 #include "nurl_diag.h"
+#include "engine/tls/nurl_tls.h"
+#include "engine/net/nurl_stream.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -37,14 +39,19 @@ void nurl_handle_request_error(nurl_err_t err, const NurlRequest *req, const cha
             break;
 
         case NURL_ERR_TLS:
-        case NURL_ERR_TLS_HANDSHAKE:
-            nurl_diag_err("TLS handshake or certificate verification failed for '%s'.", target_url);
+        case NURL_ERR_TLS_HANDSHAKE: {
+            const char *tls_err = req->stream ? nurl_tls_last_error(req->stream->tls) : NULL;
+            if (tls_err) {
+                nurl_diag_err("TLS failure for '%s': %s", target_url, tls_err);
+            } else {
+                nurl_diag_err("TLS handshake or certificate verification failed for '%s'.", target_url);
+            }
             nurl_diag_hint("if you trust this host and want to bypass verification for local testing, use the -k or --no-verify flag.");
             break;
+        }
 
         case NURL_ERR_OOM:
-            nurl_diag_err("nurl ran out of memory while processing the request to '%s'.", target_url);
-            nurl_diag_hint("try closing other high-memory applications or check your system's resource limits.");
+            nurl_diag_oom();
             break;
 
         case NURL_ERR_IO:

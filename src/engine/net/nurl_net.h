@@ -12,7 +12,7 @@ int nurl_net_connect_ex(const char *hostname, int port, unsigned int connect_tim
 /**
  * Advanced proxy connect with detailed error reporting.
  */
-int nurl_net_connect_proxy_ex(const char *host, int port, const char *proxy, const char *proxy_user, const char *no_proxy, unsigned int connect_timeout_sec, nurl_err_t *out_err);
+int nurl_net_connect_proxy_ex(const char *host, int port, const char *proxy, const char *proxy_user, const char *no_proxy, const char *connect_to, unsigned int connect_timeout_sec, nurl_err_t *out_err);
 
 
 /**

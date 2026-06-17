@@ -48,4 +48,9 @@ void nurl_tls_free(nurl_tls_t *tls);
  */
 const char *nurl_tls_get_negotiated_proto(nurl_tls_t *tls);
 
+/**
+ * Returns the last detailed TLS error message, or NULL.
+ */
+const char *nurl_tls_last_error(nurl_tls_t *tls);
+
 #endif /* NURL_TLS_H */

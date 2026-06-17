@@ -1,7 +1,7 @@
 #ifndef NURL_PROGRESS_H
 #define NURL_PROGRESS_H
 
-#include "engine/request.h"
+#include "engine/nurl_engine_request.h"
 #include <stdbool.h>
 
 typedef struct {

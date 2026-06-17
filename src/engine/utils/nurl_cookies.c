@@ -1,9 +1,11 @@
 #include "nurl_cookies.h"
+#include "errors/nurl_diag.h"
 #include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 
 nurl_cookie_jar_t *nurl_cookie_jar_create(void) {
     nurl_cookie_jar_t *jar = calloc(1, sizeof(nurl_cookie_jar_t));
@@ -24,7 +26,10 @@ void nurl_cookie_jar_free(nurl_cookie_jar_t *jar) {
 
 nurl_cookie_jar_t *nurl_cookie_jar_load(const char *path) {
     FILE *f = fopen(path, "r");
-    if (!f) return NULL;
+    if (!f) {
+        nurl_diag_err("could not open cookie jar '%s' for reading: %s", path, strerror(errno));
+        return NULL;
+    }
 
     nurl_cookie_jar_t *jar = nurl_cookie_jar_create();
     if (!jar) { fclose(f); return NULL; }
@@ -65,7 +70,10 @@ nurl_cookie_jar_t *nurl_cookie_jar_load(const char *path) {
 int nurl_cookie_jar_save(const nurl_cookie_jar_t *jar, const char *path) {
     if (!jar) return -1;
     FILE *f = fopen(path, "w");
-    if (!f) return -1;
+    if (!f) {
+        nurl_diag_err("could not open cookie jar '%s' for writing: %s", path, strerror(errno));
+        return -1;
+    }
 
     fprintf(f, "# Netscape HTTP Cookie File\n");
     for (size_t i = 0; i < jar->count; i++) {

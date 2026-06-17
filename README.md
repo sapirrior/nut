@@ -15,18 +15,19 @@ src/
 ├── main.c                  # Program entry point (WSA startup/cleanup)
 ├── cli/                    # CLI Interface Layer
 │   ├── parser/             # Optimized argument parsing (nurl_cli.c)
-│   └── runner/             # Dispatcher, request building, & progress reporting
+│   └── runner/             # Dispatcher, request execution, & progress reporting
 ├── engine/                 # Protocol & Network Engine Layer
 │   ├── nurl_engine.c       # Central engine request orchestrator (Stage-based)
-│   ├── nurl_request_build.c # Dynamic header and auth builder
+│   ├── nurl_engine_request.c # Request builder & HTTP payload initialization
+│   ├── nurl_multipart.c    # Multipart/form-data upload management
+│   ├── nurl_ctx.c          # Engine context & state (Connection Pool)
 │   ├── net/                # Buffered I/O (NurlStream) & Connection Pooling
 │   ├── tls/                # OpenSSL contexts & verification setup
 │   ├── http/               # HTTP parser, gzip/deflate, redirects
 │   └── utils/              # Cookies, base64, & NurlBuf builder
 └── errors/                 # Smart Error DX Layer
     ├── nurl_diag.c         # Concise Unix-style diagnostics
-    ├── nurl_error_handler.c # Context-aware diagnostic logic
-    └── nurl_error.c        # Centralized error code definitions
+    └── nurl_error_handler.c # Context-aware diagnostic logic
 ```
 
 ---
@@ -60,6 +61,14 @@ The [Makefile](Makefile) is tuned for production-grade builds:
 *   **Static Linking**: Links `libssl` and `libcrypto` statically producing an executable with zero external OpenSSL dependencies.
 *   **Size Optimization**: Compiled with `-Os` (size optimization) and aggressive dead-code elimination.
 *   **Cross-Platform**: Full support for Linux, macOS, and Windows (MinGW).
+
+### Testing & Debugging
+`nurl` ships with a full suite of unit and integration tests to ensure reliability:
+```bash
+make test       # Runs the C unit test runner and bash integration suite
+make asan       # Builds the project with AddressSanitizer and UndefinedBehaviorSanitizer
+make debug      # Compiles a non-optimized debug build with symbols (`-g3 -O0`)
+```
 
 ---
 
@@ -144,9 +153,15 @@ cat image.png | nurl https://api.example.com/upload --upload -
 | `-w, --format <str>` | Custom output format (e.g. `%{http_code} %{time_total}s`). |
 | `-k, --insecure` | Skip TLS certificate validation. |
 | `-L, --follow` | Follow HTTP 3xx redirections. |
+| `--max-redirects <num>` | Limit the number of redirects to follow (default 10). |
 | `-x, --proxy <url>` | Tunnel traffic through an HTTP proxy. |
+| `--connect-to <host:port:target:target_port>` | Override the connection target without changing the Host header. |
 | `-b, --cookie <val>` | Send cookies from string or file (`@file`). |
 | `--session <file>` | Read and write cookies for a persistent session. |
+| `--limit-rate <bytes/s>` | Throttle upload/download bandwidth. |
+| `-I, --head` | Fetch document info (headers) only via HEAD request. |
+| `--dump-header <file>` | Write response headers to a specified file. |
+| `--upload <file>` | Upload a file using multipart/form-data. |
 
 ---
 

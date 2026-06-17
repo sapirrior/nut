@@ -9,6 +9,7 @@ struct nurl_tls {
     SSL *ssl;
     bool verify;
     char negotiated_proto[32];
+    char last_error[256];
 };
 
 nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const char *cert_path, const char *key_path, bool force_tls12, bool force_tls13) {
@@ -26,6 +27,7 @@ nurl_tls_t *nurl_tls_create(bool verify_certs, const char *cacert_path, const ch
     tls->ssl = NULL;
     tls->verify = verify_certs;
     tls->negotiated_proto[0] = '\0';
+    tls->last_error[0] = '\0';
 
     // Use modern TLS client method
     const SSL_METHOD *method = TLS_client_method();
@@ -114,6 +116,8 @@ int nurl_tls_handshake(nurl_tls_t *tls, int socket_fd, const char *hostname) {
 
     int ret = SSL_connect(tls->ssl);
     if (ret != 1) {
+        unsigned long ssl_err = ERR_get_error();
+        ERR_error_string_n(ssl_err, tls->last_error, sizeof(tls->last_error));
         SSL_free(tls->ssl);
         tls->ssl = NULL;
         return -1;
@@ -172,4 +176,11 @@ const char *nurl_tls_get_negotiated_proto(nurl_tls_t *tls) {
         return NULL;
     }
     return tls->negotiated_proto;
+}
+
+const char *nurl_tls_last_error(nurl_tls_t *tls) {
+    if (!tls || tls->last_error[0] == '\0') {
+        return NULL;
+    }
+    return tls->last_error;
 }

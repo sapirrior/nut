@@ -51,10 +51,25 @@ int nurl_utils_parse_url(const char *url, char **scheme, char **host, int *port,
     strncpy(host_port, start, host_port_len);
     host_port[host_port_len] = '\0';
 
-    // Parse port if specified
-    char *colon = strchr(host_port, ':');
+    // Parse port if specified, handling IPv6 brackets
+    char *colon = NULL;
     char *parsed_host = NULL;
     int parsed_port = -1;
+
+    if (host_port[0] == '[') {
+        char *bracket_end = strchr(host_port, ']');
+        if (bracket_end) {
+            colon = strchr(bracket_end, ':');
+            // Strip brackets from host
+            memmove(host_port, host_port + 1, bracket_end - host_port - 1);
+            host_port[bracket_end - host_port - 1] = '\0';
+        } else {
+            // Invalid bracket notation
+            colon = strchr(host_port, ':');
+        }
+    } else {
+        colon = strchr(host_port, ':');
+    }
 
     if (colon) {
         *colon = '\0';

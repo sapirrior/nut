@@ -56,7 +56,10 @@ static int append_arg_str(char ***array, size_t *count, const char *val, const c
 static int parse_positive_int(const char *optarg, const char *name) {
     char *end;
     unsigned long v = strtoul(optarg, &end, 10);
-    if (*end != '\0' || v == 0) { nurl_diag_err("--%s must be a positive integer.", name); return -1; }
+    if (*end != '\0' || v == 0 || v > 2147483647) {
+        nurl_diag_err("--%s must be a valid positive integer.", name);
+        return -1;
+    }
     return (int)v;
 }
 
@@ -76,11 +79,11 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"retry", 1, 0, 19}, {"retry-delay", 1, 0, 20}, {"referer", 1, 0, 'e'}, {"fail", 0, 0, 'f'},
         {"tls1.2", 0, 0, 21}, {"tls1.3", 0, 0, 22}, {"method", 1, 0, 'X'}, {"upload", 1, 0, 23},
         {"connect-timeout", 1, 0, 24}, {"download", 0, 0, 'D'}, {"ping", 0, 0, 25}, {"resolve", 0, 0, 26},
-        {"dry-run", 0, 0, 27}, {0, 0, 0, 0}
+        {"dry-run", 0, 0, 27}, {"max-redirects", 1, 0, 28}, {"fail-with-body", 0, 0, 29}, {"head", 0, 0, 'I'}, {"http1.0", 0, 0, 30}, {"dump-header", 1, 0, 31}, {"connect-to", 1, 0, 32}, {"limit-rate", 1, 0, 33}, {0, 0, 0, 0}
     };
 
     int opt; opterr = 0;
-    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:e:fX:D", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:e:fX:DI", long_options, NULL)) != -1) {
         switch (opt) {
             case 'u': if (set_arg_str(&args->user, optarg, "user")) return -1; break;
             case 1:   if (set_arg_str(&args->bearer, optarg, "bearer")) return -1; break;
@@ -90,11 +93,11 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 'j': args->json = true; break;
             case 'k': args->no_verify = true; break;
             case 4:   if (set_arg_str(&args->cacert, optarg, "cacert")) return -1; break;
-            case 't': { int v = parse_positive_int(optarg, "timeout"); if (v < 0) return -1; args->timeout = (unsigned long)v; break; }
-            case 'L': args->location = true; break;
+            case 't': { int v = parse_positive_int(optarg, "timeout"); if (v < 0) return -1; args->timeout = (unsigned long)v; args->is_set.timeout = 1; break; }
+            case 'L': args->location = true; args->is_set.location = 1; break;
             case 'H': {
                 const char *colon = strchr(optarg, ':');
-                if (!colon) { nurl_err(NURL_ERR_ARG, "invalid header '%s'", optarg); return -1; }
+                if (!colon) { nurl_diag_err("invalid header '%s'", optarg); return -1; }
                 size_t key_len = colon - optarg;
                 if (key_len == 0) { nurl_diag_err("header key cannot be empty."); return -1; }
                 for (size_t i = 0; i < key_len; i++) {
@@ -123,7 +126,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 'x': if (set_arg_str(&args->proxy, optarg, "proxy")) return -1; break;
             case 16:  if (set_arg_str(&args->proxy_user, optarg, "proxy-user")) return -1; break;
             case 17:  if (set_arg_str(&args->no_proxy, optarg, "no-proxy")) return -1; break;
-            case 'A': if (set_arg_str(&args->user_agent, optarg, "user-agent")) return -1; break;
+            case 'A': if (set_arg_str(&args->user_agent, optarg, "user-agent")) return -1; args->is_set.user_agent = 1; break;
             case 18:  args->compressed = true; break;
             case 19:  { int v = parse_positive_int(optarg, "retry"); if (v < 0) return -1; args->retry = (unsigned int)v; break; }
             case 20:  { int v = parse_positive_int(optarg, "retry-delay"); if (v < 0) return -1; args->retry_delay = (unsigned long)v; break; }
@@ -133,11 +136,25 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 22:  args->tls13 = true; break;
             case 'X': if (set_arg_str(&args->method, optarg, "method")) return -1; break;
             case 23:  if (set_arg_str(&args->upload_file, optarg, "upload")) return -1; break;
-            case 24:  { int v = parse_positive_int(optarg, "connect-timeout"); if (v < 0) return -1; args->connect_timeout = (unsigned long)v; break; }
+            case 24:  { int v = parse_positive_int(optarg, "connect-timeout"); if (v < 0) return -1; args->connect_timeout = (unsigned long)v; args->is_set.connect_timeout = 1; break; }
             case 'D': args->download = true; break;
             case 25:  args->ping = true; break;
             case 26:  args->resolve = true; break;
             case 27:  args->dry_run = true; break;
+            case 28:  { int v = parse_positive_int(optarg, "max-redirects"); if (v < 0) return -1; args->max_redirects = (unsigned int)v; break; }
+            case 29:  args->fail_with_body = true; break;
+            case 30:  args->http10 = true; break;
+            case 31:  if (set_arg_str(&args->dump_header, optarg, "dump-header")) return -1; break;
+            case 32:  if (set_arg_str(&args->connect_to, optarg, "connect-to")) return -1; break;
+            case 33:  {
+                char *end;
+                unsigned long v = strtoul(optarg, &end, 10);
+                if (*end == 'k' || *end == 'K') { v *= 1024; }
+                else if (*end == 'm' || *end == 'M') { v *= 1024 * 1024; }
+                args->limit_rate = v;
+                break;
+            }
+            case 'I': if (args->method) free(args->method); args->method = strdup("HEAD"); args->include = true; break;
             case 'V': printf("nurl %s\n", NURL_VERSION); exit(0);
             case 'h': return -1;
             default:  nurl_diag_err("option '%s' unrecognized.", argv[optind - 1]);
@@ -145,15 +162,15 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         }
     }
 
-    if (args->tls12 && args->tls13) { nurl_err(NURL_ERR_ARG, "conflicting TLS versions"); return -1; }
-    if (args->ping && args->dry_run) { nurl_err(NURL_ERR_ARG, "--ping and --dry-run are mutually exclusive"); return -1; }
-    if (args->ping && args->download) { nurl_err(NURL_ERR_ARG, "--ping and --download are mutually exclusive"); return -1; }
-    if (args->resolve && args->download) { nurl_err(NURL_ERR_ARG, "--resolve and --download are mutually exclusive"); return -1; }
+    if (args->tls12 && args->tls13) { nurl_diag_err("conflicting TLS versions"); return -1; }
+    if (args->ping && args->dry_run) { nurl_diag_err("--ping and --dry-run are mutually exclusive"); return -1; }
+    if (args->ping && args->download) { nurl_diag_err("--ping and --download are mutually exclusive"); return -1; }
+    if (args->resolve && args->download) { nurl_diag_err("--resolve and --download are mutually exclusive"); return -1; }
     if (args->no_verify && args->cacert) { fprintf(stderr, "nurl: Warning: --insecure and --cacert used together. --cacert takes precedence.\n"); }
-    if (args->resume && !args->download && !args->output) { nurl_err(NURL_ERR_ARG, "--resume requires --download or -o"); return -1; }
+    if (args->resume && !args->download && !args->output) { nurl_diag_err("--resume requires --download or -o"); return -1; }
 
     int rem = argc - optind;
-    if (rem <= 0) { nurl_err(NURL_ERR_ARG, "no URL specified!"); return -1; }
+    if (rem <= 0) { nurl_diag_err("no URL specified!"); return -1; }
 
     *url = nurl_normalize_url(argv[optind]);
     nurl_cli_infer_method(args);
@@ -171,8 +188,8 @@ void nurl_cli_free_args(CommonArgs *args) {
     free(args->method); free(args->user); free(args->bearer); free(args->token);
     free(args->data); free(args->cacert); free(args->output); free(args->upload_file);
     free(args->upload_name); free(args->upload_mime); free(args->cookie);
-    free(args->cookie_jar); free(args->session); free(args->write_out);
-    free(args->cert); free(args->key); free(args->proxy); free(args->proxy_user);
+    free(args->cookie_jar); free(args->session); free(args->write_out); free(args->dump_header);
+    free(args->cert); free(args->key); free(args->proxy); free(args->proxy_user); free(args->connect_to);
     free(args->no_proxy); free(args->user_agent); free(args->referer);
     if (args->upload_fields) {
         for (size_t i = 0; i < args->upload_fields_count; i++) free(args->upload_fields[i]);

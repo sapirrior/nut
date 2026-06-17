@@ -5,7 +5,7 @@
 #include "nurl.h"
 #include "nurl_cli.h"
 #include "nurl_dispatch.h"
-#include "nurl_config.h"
+#include "cli/config/nurl_config.h"
 #include "nurl_net.h"
 #include "nurl_utils.h"
 
@@ -58,6 +58,8 @@ static void print_help(const char *prog_name) {
     printf("  --interval <ms>       Delay between pings in milliseconds\n");
     printf("  --resolve             Resolve host DNS records\n");
     printf("  -i, --include         Include response headers in the output\n");
+    printf("  -I, --head            Show document info (headers) only\n");
+    printf("  --dump-header <file>  Write response headers to file\n");
     printf("  -v, --verbose         Print verbose logs with request (> ) and response (< ) details\n");
     printf("  -s, --silent          Suppress all output logging\n");
     printf("  --raw                 Print raw, unformatted JSON responses\n");
@@ -68,6 +70,7 @@ static void print_help(const char *prog_name) {
     printf("  --retry-delay <sec>   Delay between retries in seconds (default: 1)\n");
     printf("  --tls1.2              Enforce TLS v1.2 protocol\n");
     printf("  --tls1.3              Enforce TLS v1.3 protocol\n");
+    printf("  --http1.0             Use HTTP/1.0 instead of HTTP/1.1\n");
     printf("  -V, --version         Print version information\n");
     printf("  -h, --help            Print this help dialogue\n");
 }
@@ -119,13 +122,19 @@ int main(int argc, char **argv) {
         }
     }
 
-    int result = nurl_dispatch(method, url, &args);
+    NurlCtx *ctx = nurl_ctx_create();
+    int result = nurl_dispatch(ctx, method, url, &args);
+    nurl_ctx_destroy(ctx);
 
     free(method);
     free(command);
     free(url);
     nurl_cli_free_args(&args);
     nurl_net_cleanup();
+
+    if (result == NURL_ERR_HTTP_4XX || result == NURL_ERR_HTTP_5XX) {
+        return 22;
+    }
 
     return result;
 }

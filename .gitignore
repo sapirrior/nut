@@ -1,2 +1,10 @@
 nurl
+nurl.exe
 *.o
+build/
+*.d
+*.dSYM/
+.DS_Store
+tests/fuzz/corpus/
+test_url_parser
+test_headers

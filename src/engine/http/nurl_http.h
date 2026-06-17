@@ -2,19 +2,11 @@
 #define NURL_HTTP_H
 
 #include "net/nurl_stream.h"
-#include "engine/request.h"
-#include <stddef.h>
-
-typedef struct {
-    int status_code;
-    char *status_text;
-    char **headers;
-    size_t header_count;
-    unsigned char *body;
-    size_t body_len;
-} nurl_http_response_t;
-
+#include "engine/nurl_engine_types.h"
 #include "errors/nurl_error.h"
+#include <stddef.h>
+#include <stdio.h>
+#include <stdint.h>
 
 /**
  * Sends a structured HTTP/1.1 request via the provided active buffered stream.
@@ -27,10 +19,11 @@ typedef struct {
  * Returns NURL_OK on success, or an explicit nurl_err_t on failure.
  * If successful, *out_response will contain the dynamically allocated response.
  */
-#include <stdio.h>
-#include <stdint.h>
 
-typedef struct {
+typedef struct NurlHttpParams NurlHttpParams;
+typedef void (*nurl_headers_cb)(NurlHttpParams *p, const nurl_http_response_t *res, void *user_data);
+
+struct NurlHttpParams {
     const char        *method;
     const char        *path;
     const char        *hostname;
@@ -43,11 +36,14 @@ typedef struct {
     unsigned long      resume_offset;
     nurl_progress_cb   progress_cb;
     void              *progress_data;
-} NurlHttpParams;
+    nurl_headers_cb    header_cb;
+    void              *header_data;
+    bool               http10;
+};
 
 nurl_err_t nurl_http_request(
     NurlStream *stream,
-    const NurlHttpParams *p,
+    NurlHttpParams *p,
     nurl_http_response_t **out_response
 );
 

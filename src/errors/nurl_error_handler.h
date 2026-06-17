@@ -2,7 +2,7 @@
 #define NURL_ERROR_HANDLER_H
 
 #include "nurl_error.h"
-#include "engine/request.h"
+#include "engine/nurl_engine_request.h"
 
 /**
  * Centrally handles request errors by emitting smart, context-aware diagnostics.

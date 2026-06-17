@@ -1,4 +1,5 @@
 #include "nurl_headers.h"
+#include "nurl_buf.h"
 #include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,27 +118,13 @@ bool nurl_headermap_has(const NurlHeaderMap *m, const char *key) {
 }
 
 char *nurl_headermap_serialize(const NurlHeaderMap *m) {
-    if (!m || m->count == 0) {
-        char *empty = malloc(1);
-        if (empty) empty[0] = '\0';
-        return empty;
-    }
-
-    size_t total_len = 0;
+    if (!m) return NULL;
+    NurlBuf b;
+    nurl_buf_init(&b);
     for (size_t i = 0; i < m->count; i++) {
-        total_len += strlen(m->keys[i]) + strlen(m->values[i]) + 4;
+        nurl_buf_printf(&b, "%s: %s\r\n", m->keys[i], m->values[i]);
     }
-
-    char *buf = malloc(total_len + 1);
-    if (!buf) return NULL;
-
-    size_t offset = 0;
-    for (size_t i = 0; i < m->count; i++) {
-        size_t len = sprintf(buf + offset, "%s: %s\r\n", m->keys[i], m->values[i]);
-        offset += len;
-    }
-    buf[total_len] = '\0';
-    return buf;
+    return nurl_buf_take(&b);
 }
 
 void nurl_headermap_free(NurlHeaderMap *m) {

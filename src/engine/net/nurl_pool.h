@@ -1,7 +1,7 @@
 #ifndef NURL_POOL_H
 #define NURL_POOL_H
 
-#include "engine/request.h"
+#include "engine/nurl_engine_request.h"
 #include "nurl_stream.h"
 #include <time.h>
 #include <stdbool.h>

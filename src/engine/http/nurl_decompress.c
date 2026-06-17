@@ -36,7 +36,7 @@ unsigned char *nurl_decompress_gzip_deflate(const unsigned char *src, size_t src
             return NULL;
         }
         if (strm.avail_out == 0) {
-            size_t old_cap = dest_cap;
+            size_t bytes_written = dest_cap - strm.avail_out;
             dest_cap *= 2;
             unsigned char *temp = realloc(dest, dest_cap);
             if (!temp) {
@@ -45,21 +45,12 @@ unsigned char *nurl_decompress_gzip_deflate(const unsigned char *src, size_t src
                 return NULL;
             }
             dest = temp;
-            strm.next_out = dest + (old_cap - strm.avail_out);
-            strm.avail_out = dest_cap - (old_cap - strm.avail_out);
+            strm.next_out = dest + bytes_written;
+            strm.avail_out = (uInt)(dest_cap - bytes_written);
         }
     }
 
     size_t written = dest_cap - strm.avail_out;
-    if (written >= dest_cap) {
-        unsigned char *temp = realloc(dest, written + 1);
-        if (!temp) {
-            free(dest);
-            inflateEnd(&strm);
-            return NULL;
-        }
-        dest = temp;
-    }
     dest[written] = '\0';
     *out_len = written;
 

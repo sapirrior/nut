@@ -13,10 +13,13 @@ typedef struct {
     size_t        len;
 } NurlStreamBuffer;
 
-typedef struct {
+typedef struct NurlStream {
     int              fd;
     nurl_tls_t      *tls;
     NurlStreamBuffer read_buf;
+    unsigned long    limit_rate;    /* bytes per second, 0=unlimited */
+    double           last_throttle_time;
+    unsigned long    bytes_this_sec;
 } NurlStream;
 
 /**
@@ -24,6 +27,11 @@ typedef struct {
  * The stream does NOT take ownership of the fd or tls (it won't close them on free).
  */
 NurlStream *nurl_stream_new(int fd, nurl_tls_t *tls);
+
+/**
+ * Sets the bandwidth limit rate in bytes per second.
+ */
+void        nurl_stream_set_limit_rate(NurlStream *s, unsigned long rate);
 
 /**
  * Frees the stream structure.

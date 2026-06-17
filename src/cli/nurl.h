@@ -2,11 +2,12 @@
 #define NURL_H
 
 #ifndef NURL_VERSION
-#define NURL_VERSION "0.6.0"
+#define NURL_VERSION "0.8.0"
 #endif
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
     // Auth
@@ -48,11 +49,14 @@ typedef struct {
     char **header;
     size_t header_count;
     bool compressed;
+    bool http10;
     char *proxy;
     char *proxy_user;
     char *no_proxy;
+    char *connect_to;
     unsigned int retry;
     unsigned long retry_delay;
+    unsigned long limit_rate;
 
     // Output
     char *output;
@@ -60,7 +64,9 @@ typedef struct {
     bool verbose;
     bool silent;
     char *write_out;
+    char *dump_header;
     bool fail;
+    bool fail_with_body;
     bool raw;
 
     // Ping specific
@@ -75,6 +81,13 @@ typedef struct {
     char *upload_mime;
     char **upload_fields;
     size_t upload_fields_count;
+
+    struct {
+        uint64_t timeout : 1;
+        uint64_t connect_timeout : 1;
+        uint64_t location : 1;
+        uint64_t user_agent : 1;
+    } is_set;
 } CommonArgs;
 
 #include "errors/nurl_error.h"

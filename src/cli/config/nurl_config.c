@@ -1,11 +1,13 @@
 #include "nurl_config.h"
 #include "nurl_utils.h"
+#include "errors/nurl_diag.h"
 #include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <strings.h>
+#include <errno.h>
 
 static void strip_quotes(char *str) {
     size_t len = strlen(str);
@@ -44,8 +46,15 @@ void nurl_config_load_and_merge(CommonArgs *args) {
     if (!config_path) return;
 
     FILE *f = fopen(config_path, "r");
+    if (!f) {
+        // Only warn if explicitly set via env var
+        if (getenv("NURL_CONFIG")) {
+            nurl_diag_warn("could not open config file '%s': %s", config_path, strerror(errno));
+        }
+        free(allocated_path);
+        return;
+    }
     free(allocated_path);
-    if (!f) return;
 
     char line[1024];
     int section = 0; // 0 = none, 1 = defaults, 2 = headers
@@ -76,15 +85,16 @@ void nurl_config_load_and_merge(CommonArgs *args) {
 
             if (section == 1) {
                 // [defaults]
-                if (nurl_strcasecmp(key, "timeout") == 0 && args->timeout == 30) {
+                if (nurl_strcasecmp(key, "timeout") == 0 && !args->is_set.timeout) {
                     args->timeout = strtoul(val, NULL, 10);
-                } else if (nurl_strcasecmp(key, "connect_timeout") == 0 && args->connect_timeout == 10) {
+                } else if (nurl_strcasecmp(key, "connect_timeout") == 0 && !args->is_set.connect_timeout) {
                     args->connect_timeout = strtoul(val, NULL, 10);
-                } else if (nurl_strcasecmp(key, "follow_redirects") == 0 && !args->location) {
+                } else if (nurl_strcasecmp(key, "follow_redirects") == 0 && !args->is_set.location) {
                     if (nurl_strcasecmp(val, "true") == 0) {
                         args->location = true;
                     }
-                } else if (nurl_strcasecmp(key, "user_agent") == 0 && !args->user_agent) {
+                } else if (nurl_strcasecmp(key, "user_agent") == 0 && !args->is_set.user_agent) {
+                    if (args->user_agent) free(args->user_agent);
                     args->user_agent = strdup(val);
                 }
             } else if (section == 2) {
@@ -109,4 +119,17 @@ void nurl_config_load_and_merge(CommonArgs *args) {
     }
 
     fclose(f);
+
+    // Environment variables
+    if (!args->proxy) {
+        char *p = getenv("https_proxy");
+        if (!p) p = getenv("HTTPS_PROXY");
+        if (!p) p = getenv("http_proxy");
+        if (!p) p = getenv("HTTP_PROXY");
+        if (p) args->proxy = strdup(p);
+    }
+    if (!args->cacert) {
+        char *c = getenv("NURL_CACERT");
+        if (c) args->cacert = strdup(c);
+    }
 }

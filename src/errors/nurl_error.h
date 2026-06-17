@@ -12,17 +12,17 @@ typedef enum {
     NURL_ERR_CONNECT   = 8,   /* TCP connection failed */
     NURL_ERR_PROXY     = 9,   /* Proxy connection/handshake failed */
     NURL_ERR_TLS_HANDSHAKE = 10, /* Specific TLS handshake failure */
-    NURL_ERR_TIMEOUT   = 28,  /* curl compat: operation timed out */
-    NURL_ERR_HTTP_4XX  = 22,  /* curl compat: 4xx response, -f/--fail */
-    NURL_ERR_HTTP_5XX  = 43,  /* curl compat: 5xx response, -f/--fail */
-    NURL_ERR_ARG       = 3,   /* Bad CLI argument */
+    NURL_ERR_TIMEOUT   = 28,  /* curl exit 28: operation timed out */
+    NURL_ERR_HTTP_4XX  = 22,  /* curl exit 22: HTTP 4xx response with -f/--fail */
+    NURL_ERR_HTTP_5XX  = 23,  /* mapped to 22 on exit */
+    NURL_ERR_ARG       = 3,   /* curl exit 3: Bad CLI argument */
     NURL_ERR_GENERIC   = 99,
 } nurl_err_t;
 
-/* Emit a formatted error to stderr and return the code */
-nurl_err_t nurl_err(nurl_err_t code, const char *fmt, ...);
+/* nurl_err is now a no-op side-effect wise, returning the code only */
+static inline nurl_err_t nurl_err(nurl_err_t code, ...) { return code; }
 
-/* Emit a suggestion hint (no exit) */
-void nurl_hint(const char *fmt, ...);
+/* nurl_hint is now a no-op; use nurl_diag_hint instead */
+static inline void nurl_hint(const char *fmt, ...) { (void)fmt; }
 
 #endif /* NURL_ERROR_H */

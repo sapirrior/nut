@@ -1,8 +1,12 @@
 #include "nurl_request.h"
 #include "nurl_engine.h"
-#include "request.h"
+#include "nurl_engine_request.h"
+#include "nurl_retry.h"
+#include "nurl_progress.h"
+#include "net/nurl_stream.h"
 #include "utils/nurl_utils.h"
 #include "utils/nurl_buf.h"
+#include "errors/nurl_diag.h"
 #include "errors/nurl_error_handler.h"
 #include "compat/nurl_compat.h"
 #include <sys/time.h>
@@ -11,8 +15,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <errno.h>
 
-static void handle_write_out(const char *template, const nurl_http_response_t *res, const char *method, const char *url, double elapsed_sec, const NurlOperationStats *stats) {
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static void handle_write_out(const char *template, const nurl_http_response_t *res, const char *method, const char *url, double elapsed_sec, const NurlOperationStats *stats, NurlRequest *req) {
     if (!template) return;
 
     NurlBuf b;
@@ -39,6 +48,32 @@ static void handle_write_out(const char *template, const nurl_http_response_t *r
                     nurl_buf_printf(&b, "%d", stats->num_redirects);
                 } else if (strncmp(start, "method", key_len) == 0) {
                     nurl_buf_append(&b, method, strlen(method));
+                } else if (strncmp(start, "remote_ip", key_len) == 0 || strncmp(start, "remote_port", key_len) == 0) {
+                    if (req && req->stream) {
+                        struct sockaddr_storage addr;
+                        socklen_t addr_len = sizeof(addr);
+                        if (getpeername(req->stream->fd, (struct sockaddr *)&addr, &addr_len) == 0) {
+                            if (addr.ss_family == AF_INET) {
+                                struct sockaddr_in *s = (struct sockaddr_in *)&addr;
+                                if (strncmp(start, "remote_ip", key_len) == 0) {
+                                    char ip[INET_ADDRSTRLEN];
+                                    inet_ntop(AF_INET, &s->sin_addr, ip, sizeof(ip));
+                                    nurl_buf_append(&b, ip, strlen(ip));
+                                } else {
+                                    nurl_buf_printf(&b, "%d", ntohs(s->sin_port));
+                                }
+                            } else if (addr.ss_family == AF_INET6) {
+                                struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
+                                if (strncmp(start, "remote_ip", key_len) == 0) {
+                                    char ip[INET6_ADDRSTRLEN];
+                                    inet_ntop(AF_INET6, &s->sin6_addr, ip, sizeof(ip));
+                                    nurl_buf_append(&b, ip, strlen(ip));
+                                } else {
+                                    nurl_buf_printf(&b, "%d", ntohs(s->sin6_port));
+                                }
+                            }
+                        }
+                    }
                 } else if (strncmp(start, "content_type", key_len) == 0) {
                     const char *content_type = "";
                     for (size_t i = 0; i < res->header_count; i++) {
@@ -76,10 +111,7 @@ static void handle_write_out(const char *template, const nurl_http_response_t *r
     free(out);
 }
 
-#include "nurl_progress.h"
-#include "nurl_dispatch.h"
-
-int nurl_request_generic(const char *method, const char *url, const CommonArgs *common) {
+int nurl_request_generic(NurlCtx *ctx, const char *method, const char *url, const CommonArgs *common) {
     double start_time = nurl_utils_get_time_sec();
 
     nurl_http_response_t *res = NULL;
@@ -100,7 +132,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         req->progress_data = &p_ctx;
     }
 
-    int engine_err = execute_with_retry(req, common, &res, &effective_url, &stats);
+    int engine_err = execute_with_retry(ctx, req, common, &res, &effective_url, &stats);
 
     if (engine_err != NURL_OK) {
         if (!common->silent) {
@@ -118,8 +150,22 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         return NURL_ERR_GENERIC;
     }
 
+    if (common->dump_header) {
+        FILE *hf = fopen(common->dump_header, "w");
+        if (hf) {
+            fprintf(hf, "HTTP/1.1 %d %s\r\n", res->status_code, res->status_text);
+            for (size_t i = 0; i < res->header_count; i++) {
+                fprintf(hf, "%s\r\n", res->headers[i]);
+            }
+            fprintf(hf, "\r\n");
+            fclose(hf);
+        } else {
+            nurl_diag_warn("could not open header dump file '%s': %s", common->dump_header, strerror(errno));
+        }
+    }
+
     bool is_error_status = (res->status_code >= 400);
-    bool should_suppress_output = (common->fail && is_error_status);
+    bool should_suppress_output = (common->fail && is_error_status && !common->fail_with_body);
 
     if (!should_suppress_output) {
         if (common->include && !common->verbose) {
@@ -134,7 +180,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             bool is_stdout = (strcmp(common->output, "-") == 0);
             FILE *f = is_stdout ? stdout : fopen(common->output, "wb");
             if (!f) {
-                fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
+                nurl_diag_err("could not open '%s' for writing: %s", common->output, strerror(errno));
                 nurl_http_response_free(res);
                 free(effective_url);
                 return NURL_ERR_IO;
@@ -154,7 +200,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
     double elapsed_sec = nurl_utils_get_time_sec() - start_time;
 
     if (common->write_out && !should_suppress_output) {
-        handle_write_out(common->write_out, res, method, effective_url ? effective_url : url, elapsed_sec, &stats);
+        handle_write_out(common->write_out, res, method, effective_url ? effective_url : url, elapsed_sec, &stats, req);
     }
 
     int ret_code = NURL_OK;

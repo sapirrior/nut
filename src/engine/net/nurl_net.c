@@ -150,9 +150,39 @@ void nurl_net_close(int socket_fd) {
 int nurl_net_connect_proxy_ex(
     const char *host, int port,
     const char *proxy, const char *proxy_user, const char *no_proxy,
+    const char *connect_to,
     unsigned int connect_timeout_sec,
     nurl_err_t *out_err
 ) {
+    const char *target_host = host;
+    int target_port = port;
+    char *allocated_target_host = NULL;
+
+    if (connect_to) {
+        // Format: host:port:target_host:target_port
+        char *ct = strdup(connect_to);
+        char *h = ct;
+        char *p = strchr(h, ':');
+        if (p) {
+            *p = '\0';
+            char *th = strchr(p + 1, ':');
+            if (th) {
+                *th = '\0';
+                char *tp = strchr(th + 1, ':');
+                if (tp) {
+                    *tp = '\0';
+                    int p_val = atoi(p + 1);
+                    if (nurl_strcasecmp(h, host) == 0 && p_val == port) {
+                        allocated_target_host = strdup(th + 1);
+                        target_host = allocated_target_host;
+                        target_port = atoi(tp + 1);
+                    }
+                }
+            }
+        }
+        free(ct);
+    }
+
     bool use_proxy = (proxy != NULL);
     if (use_proxy && no_proxy) {
         char *np_copy = strdup(no_proxy);
@@ -183,13 +213,16 @@ int nurl_net_connect_proxy_ex(
     }
 
     if (!use_proxy) {
-        return nurl_net_connect_ex(host, port, connect_timeout_sec, out_err);
+        int res = nurl_net_connect_ex(target_host, target_port, connect_timeout_sec, out_err);
+        if (allocated_target_host) free(allocated_target_host);
+        return res;
     }
 
     char *proxy_scheme = NULL, *proxy_host = NULL, *proxy_path = NULL;
     int proxy_port = 0;
     if (nurl_utils_parse_url(proxy, &proxy_scheme, &proxy_host, &proxy_port, &proxy_path) != 0) {
         if (out_err) *out_err = NURL_ERR_URL;
+        if (allocated_target_host) free(allocated_target_host);
         return -1;
     }
     free(proxy_scheme);
@@ -197,17 +230,22 @@ int nurl_net_connect_proxy_ex(
 
     if (!proxy_host) {
         if (out_err) *out_err = NURL_ERR_URL;
+        if (allocated_target_host) free(allocated_target_host);
         return -1;
     }
 
     int socket_fd = nurl_net_connect_ex(proxy_host, proxy_port, connect_timeout_sec, out_err);
     free(proxy_host);
 
-    if (socket_fd < 0) return -1;
+    if (socket_fd < 0) {
+        if (allocated_target_host) free(allocated_target_host);
+        return -1;
+    }
 
     // HTTP CONNECT Tunneling
     char connect_req[2048];
-    int req_len = snprintf(connect_req, sizeof(connect_req), "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", host, port, host, port);
+    int req_len = snprintf(connect_req, sizeof(connect_req), "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", target_host, target_port, target_host, target_port);
+    if (allocated_target_host) free(allocated_target_host);
 
     if (proxy_user) {
         char *auth_b64 = nurl_utils_base64_encode((const unsigned char *)proxy_user, strlen(proxy_user));

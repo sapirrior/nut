@@ -1,4 +1,5 @@
 #include "nurl_http.h"
+#include "errors/nurl_diag.h"
 #include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,10 +9,11 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <errno.h>
 
 nurl_err_t nurl_http_request(
     NurlStream *stream,
-    const NurlHttpParams *p,
+    NurlHttpParams *p,
     nurl_http_response_t **out_response
 ) {
     if (out_response) *out_response = NULL;
@@ -66,12 +68,14 @@ nurl_err_t nurl_http_request(
     }
 
     int written;
-    written = snprintf(req_buf, req_capacity, "%s %s HTTP/1.1\r\nHost: %s\r\n", p->method, p->path, p->hostname);
+    written = snprintf(req_buf, req_capacity, "%s %s HTTP/%s\r\nHost: %s\r\n", p->method, p->path, p->http10 ? "1.0" : "1.1", p->hostname);
     if (!has_user_agent) {
         written += snprintf(req_buf + written, req_capacity - written, "User-Agent: nurl/" NURL_VERSION "\r\n");
     }
     if (!has_connection) {
-        written += snprintf(req_buf + written, req_capacity - written, "Connection: close\r\n");
+        written += snprintf(req_buf + written, req_capacity - written, "Connection: %s\r\n", p->http10 ? "close" : "close");
+        // Wait, if http1.1 we also use close because the engine currently doesn't support persistent connections well in all paths?
+        // Actually, nurl uses "close" by default for now.
     }
 
     if (total_body_len > 0) {
@@ -87,9 +91,11 @@ nurl_err_t nurl_http_request(
     written += snprintf(req_buf + written, req_capacity - written, "\r\n");
 
     // Send HTTP Headers
-    if (nurl_stream_write(stream, req_buf, written) <= 0) {
+    int w_headers = nurl_stream_write(stream, req_buf, written);
+    if (w_headers <= 0) {
+        nurl_err_t err = (w_headers < 0) ? (nurl_err_t)(-w_headers) : NURL_ERR_NETWORK;
         free(req_buf);
-        return NURL_ERR_NETWORK;
+        return err;
     }
     free(req_buf);
 
@@ -99,22 +105,26 @@ nurl_err_t nurl_http_request(
             NurlBodyPart *part = &p->body_parts[i];
             if (part->type == NURL_BODY_PART_MEM) {
                 if (part->data && part->len > 0) {
-                    if (nurl_stream_write(stream, part->data, part->len) <= 0) {
-                        return NURL_ERR_NETWORK;
+                    int wn = nurl_stream_write(stream, part->data, part->len);
+                    if (wn <= 0) {
+                        return (wn < 0) ? (nurl_err_t)(-wn) : NURL_ERR_NETWORK;
                     }
                 }
             } else if (part->type == NURL_BODY_PART_FILE) {
                 if (part->filepath) {
                     FILE *bf = fopen(part->filepath, "rb");
                     if (!bf) {
+                        nurl_diag_err("could not open '%s' for reading: %s", part->filepath, strerror(errno));
                         return NURL_ERR_IO;
                     }
                     char send_buf[65536];
                     size_t r;
                     while ((r = fread(send_buf, 1, sizeof(send_buf), bf)) > 0) {
-                        if (nurl_stream_write(stream, send_buf, r) <= 0) {
+                        int wn = nurl_stream_write(stream, send_buf, r);
+                        if (wn <= 0) {
+                            nurl_err_t err = (wn < 0) ? (nurl_err_t)(-wn) : NURL_ERR_NETWORK;
                             fclose(bf);
-                            return NURL_ERR_NETWORK;
+                            return err;
                         }
                     }
                     fclose(bf);
@@ -122,8 +132,9 @@ nurl_err_t nurl_http_request(
             }
         }
     } else if (p->body && p->body_len > 0) {
-        if (nurl_stream_write(stream, p->body, p->body_len) <= 0) {
-            return NURL_ERR_NETWORK;
+        int wn = nurl_stream_write(stream, p->body, p->body_len);
+        if (wn <= 0) {
+            return (wn < 0) ? (nurl_err_t)(-wn) : NURL_ERR_NETWORK;
         }
     }
 
@@ -137,8 +148,9 @@ nurl_err_t nurl_http_request(
     // Read Status Line
     line_len = nurl_stream_read_line(stream, line_buf, sizeof(line_buf));
     if (line_len <= 0) {
+        nurl_err_t err = (line_len < 0) ? (nurl_err_t)(-line_len) : NURL_ERR_NETWORK;
         nurl_http_response_free(res);
-        return NURL_ERR_NETWORK;
+        return err;
     }
 
     // Parse status line: e.g. "HTTP/1.1 200 OK"
@@ -172,7 +184,15 @@ nurl_err_t nurl_http_request(
     size_t content_len = 0;
     unsigned long total_len = 0;
 
-    while ((line_len = nurl_stream_read_line(stream, line_buf, sizeof(line_buf))) > 0) {
+    while (1) {
+        line_len = nurl_stream_read_line(stream, line_buf, sizeof(line_buf));
+        if (line_len <= 0) {
+            if (line_len < 0) {
+                nurl_http_response_free(res);
+                return (nurl_err_t)(-line_len);
+            }
+            break; // Premature EOF
+        }
         if (line_len <= 2 && (line_buf[0] == '\n' || (line_buf[0] == '\r' && line_buf[1] == '\n'))) {
             break; // End of headers
         }
@@ -217,6 +237,10 @@ nurl_err_t nurl_http_request(
         }
     }
 
+    if (p->header_cb) {
+        p->header_cb(p, res, p->header_data);
+    }
+
     if (nurl_strcasecmp(p->method, "HEAD") == 0) {
         if (out_response) *out_response = res;
         return NURL_OK;
@@ -247,6 +271,11 @@ nurl_err_t nurl_http_request(
             char chunk_size_buf[128];
             int size_line_len = nurl_stream_read_line(stream, chunk_size_buf, sizeof(chunk_size_buf));
             if (size_line_len <= 0) {
+                if (size_line_len < 0) {
+                    if (body_buf) free(body_buf);
+                    nurl_http_response_free(res);
+                    return (nurl_err_t)(-size_line_len);
+                }
                 break; // Premature EOF
             }
 
@@ -254,7 +283,12 @@ nurl_err_t nurl_http_request(
             if (chunk_size == 0) {
                 // Consume trailing CRLF of the last chunk size 0
                 char dummy[2];
-                nurl_stream_read_exact(stream, dummy, 2);
+                int dr = nurl_stream_read_exact(stream, dummy, 2);
+                if (dr <= 0) {
+                    if (body_buf) free(body_buf);
+                    nurl_http_response_free(res);
+                    return (dr < 0) ? (nurl_err_t)(-dr) : NURL_ERR_NETWORK;
+                }
                 break; // Finished
             }
 
@@ -265,9 +299,10 @@ nurl_err_t nurl_http_request(
                 if (to_read > sizeof(chunk_buf)) to_read = sizeof(chunk_buf);
                 int n = nurl_stream_read(stream, chunk_buf, to_read);
                 if (n <= 0) {
+                    nurl_err_t err = (n < 0) ? (nurl_err_t)(-n) : NURL_ERR_NETWORK;
                     if (body_buf) free(body_buf);
                     nurl_http_response_free(res);
-                    return NURL_ERR_NETWORK;
+                    return err;
                 }
 
                 if (p->body_out) {
@@ -293,7 +328,12 @@ nurl_err_t nurl_http_request(
 
             // Consume trailing CRLF of this chunk
             char dummy[2];
-            nurl_stream_read_exact(stream, dummy, 2);
+            int dr = nurl_stream_read_exact(stream, dummy, 2);
+            if (dr <= 0) {
+                if (body_buf) free(body_buf);
+                nurl_http_response_free(res);
+                return (dr < 0) ? (nurl_err_t)(-dr) : NURL_ERR_NETWORK;
+            }
         }
 
         if (!p->body_out && body_buf) {
@@ -317,7 +357,14 @@ nurl_err_t nurl_http_request(
             size_t to_read = content_len - body_len;
             if (to_read > sizeof(chunk_buf)) to_read = sizeof(chunk_buf);
             int n = nurl_stream_read(stream, chunk_buf, to_read);
-            if (n <= 0) break; // Premature EOF
+            if (n <= 0) {
+                if (n < 0) {
+                    if (body_buf) free(body_buf);
+                    nurl_http_response_free(res);
+                    return (nurl_err_t)(-n);
+                }
+                break; // Premature EOF
+            }
 
             if (p->body_out) {
                 fwrite(chunk_buf, 1, n, p->body_out);
@@ -349,7 +396,12 @@ nurl_err_t nurl_http_request(
 
         char chunk_buf[4096];
         int n;
-        while ((n = nurl_stream_read(stream, chunk_buf, sizeof(chunk_buf))) > 0) {
+        while ((n = nurl_stream_read(stream, chunk_buf, sizeof(chunk_buf))) != 0) {
+            if (n < 0) {
+                if (body_buf) free(body_buf);
+                nurl_http_response_free(res);
+                return (nurl_err_t)(-n);
+            }
             if (p->body_out) {
                 fwrite(chunk_buf, 1, n, p->body_out);
             } else {

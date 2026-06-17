@@ -1,7 +1,11 @@
 #include "nurl_stream.h"
+#include "utils/nurl_utils.h"
+#include "errors/nurl_error.h"
+#include "compat/nurl_compat.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -20,8 +24,38 @@ NurlStream *nurl_stream_new(int fd, nurl_tls_t *tls) {
     return s;
 }
 
+void nurl_stream_set_limit_rate(NurlStream *s, unsigned long rate) {
+    if (s) s->limit_rate = rate;
+}
+
 void nurl_stream_free(NurlStream *s) {
     free(s);
+}
+
+static void throttle(NurlStream *s, size_t bytes) {
+    if (!s || s->limit_rate == 0 || bytes == 0) return;
+
+    double now = nurl_utils_get_time_sec();
+    if (s->last_throttle_time == 0) {
+        s->last_throttle_time = now;
+        s->bytes_this_sec = 0;
+    }
+
+    s->bytes_this_sec += bytes;
+
+    if (now - s->last_throttle_time >= 1.0) {
+        s->last_throttle_time = now;
+        s->bytes_this_sec = (s->bytes_this_sec > s->limit_rate) ? s->limit_rate : 0;
+    }
+
+    if (s->bytes_this_sec >= s->limit_rate) {
+        double elapsed = now - s->last_throttle_time;
+        if (elapsed < 1.0) {
+            nurl_sleep_ms((unsigned long)((1.0 - elapsed) * 1000));
+        }
+        s->last_throttle_time = nurl_utils_get_time_sec();
+        s->bytes_this_sec = 0;
+    }
 }
 
 static int fill_buffer(NurlStream *s) {
@@ -29,16 +63,33 @@ static int fill_buffer(NurlStream *s) {
         return (int)(s->read_buf.len - s->read_buf.pos);
     }
 
+    size_t to_read = NURL_STREAM_BUFFER_SIZE;
+    if (s->limit_rate > 0) {
+        size_t remaining_this_sec = s->limit_rate > s->bytes_this_sec ? s->limit_rate - s->bytes_this_sec : 1;
+        if (to_read > remaining_this_sec) to_read = remaining_this_sec;
+    }
+
     int n;
     if (s->tls) {
-        n = nurl_tls_read(s->tls, s->read_buf.data, NURL_STREAM_BUFFER_SIZE);
+        n = nurl_tls_read(s->tls, s->read_buf.data, (int)to_read);
     } else {
-        n = socket_read(s->fd, s->read_buf.data, NURL_STREAM_BUFFER_SIZE);
+        n = socket_read(s->fd, s->read_buf.data, to_read);
     }
 
     if (n > 0) {
         s->read_buf.pos = 0;
         s->read_buf.len = (size_t)n;
+        throttle(s, (size_t)n);
+    } else if (n < 0) {
+        s->read_buf.pos = 0;
+        s->read_buf.len = 0;
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAETIMEDOUT) return -NURL_ERR_TIMEOUT;
+#else
+        if (errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK) return -NURL_ERR_TIMEOUT;
+#endif
+        return -NURL_ERR_NETWORK;
     } else {
         s->read_buf.pos = 0;
         s->read_buf.len = 0;
@@ -97,11 +148,31 @@ int nurl_stream_read_line(NurlStream *s, char *buf, size_t max_len) {
 }
 
 int nurl_stream_write(NurlStream *s, const void *buf, size_t len) {
-    if (s->tls) {
-        return nurl_tls_write(s->tls, buf, (int)len);
-    } else {
-        return socket_write(s->fd, buf, len);
+    size_t to_write = len;
+    if (s->limit_rate > 0) {
+        size_t remaining_this_sec = s->limit_rate > s->bytes_this_sec ? s->limit_rate - s->bytes_this_sec : 1;
+        if (to_write > remaining_this_sec) to_write = remaining_this_sec;
     }
+
+    int n;
+    if (s->tls) {
+        n = nurl_tls_write(s->tls, buf, (int)to_write);
+    } else {
+        n = socket_write(s->fd, buf, to_write);
+    }
+
+    if (n > 0) {
+        throttle(s, (size_t)n);
+    } else if (n < 0) {
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAETIMEDOUT) return -NURL_ERR_TIMEOUT;
+#else
+        if (errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK) return -NURL_ERR_TIMEOUT;
+#endif
+        return -NURL_ERR_NETWORK;
+    }
+    return n;
 }
 
 bool nurl_stream_has_buffered(const NurlStream *s) {

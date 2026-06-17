@@ -97,7 +97,7 @@ nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, boo
 
     // 3. Connect & handshake
     nurl_err_t conn_err = NURL_OK;
-    int fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, req->connect_timeout_sec, &conn_err);
+    int fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, req->connect_to, req->connect_timeout_sec, &conn_err);
     if (fd < 0) {
         return conn_err;
     }
@@ -163,7 +163,7 @@ void nurl_pool_release(NurlConnPool *pool, const char *host, int port, NurlStrea
 }
 
 void nurl_pool_evict(NurlConnPool *pool, NurlStream *stream) {
-    if (!pool) return;
+    if (!pool || !stream) return;
     for (int i = 0; i < NURL_POOL_MAX; i++) {
         NurlPoolEntry *e = &pool->entries[i];
         if (e->stream == stream) {
@@ -175,4 +175,8 @@ void nurl_pool_evict(NurlConnPool *pool, NurlStream *stream) {
             return;
         }
     }
+    // Bypass connection not in pool — close it directly
+    if (stream->tls) nurl_tls_free(stream->tls);
+    nurl_net_close(stream->fd);
+    nurl_stream_free(stream);
 }

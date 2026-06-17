@@ -3,27 +3,17 @@
 
 #include "nurl.h"
 #include "engine/utils/nurl_headers.h"
+#include "engine/nurl_engine_types.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 
 typedef struct NurlConnPool NurlConnPool;
 
-typedef enum {
-    NURL_BODY_PART_MEM,
-    NURL_BODY_PART_FILE
-} NurlBodyPartType;
+typedef struct NurlRequest NurlRequest;
+typedef void (*nurl_req_headers_cb)(NurlRequest *req, const nurl_http_response_t *res, void *user_data);
 
-typedef struct {
-    NurlBodyPartType type;
-    const uint8_t *data;
-    size_t len;
-    const char *filepath;
-} NurlBodyPart;
-
-typedef void (*nurl_progress_cb)(unsigned long downloaded, unsigned long total, bool finished, void *user_data);
-
-typedef struct {
+struct NurlRequest {
     const char      *method;       /* "GET", "POST", etc. */
     const char      *url;
     NurlHeaderMap  *headers;
@@ -41,7 +31,9 @@ typedef struct {
     unsigned int     max_redirects;   /* default: 10 */
     unsigned int     retry_count;
     unsigned int     retry_delay_sec;
+    unsigned long    limit_rate;
     bool             fail_on_error;
+    bool             fail_with_body;
 
     /* TLS config */
     bool             tls_verify;
@@ -54,6 +46,7 @@ typedef struct {
     const char      *proxy;
     const char      *proxy_user;
     const char      *no_proxy;
+    const char      *connect_to;
 
     /* Cookies */
     const char      *cookie;
@@ -67,6 +60,7 @@ typedef struct {
     bool             silent;
     bool             raw_output;
     bool             decompress;
+    bool             http10;
 
     /* Download-specific */
     bool             resume;
@@ -74,16 +68,23 @@ typedef struct {
     unsigned long    resume_offset;
     nurl_progress_cb progress_cb;
     void            *progress_data;
+    nurl_req_headers_cb header_cb;
+    void            *header_data;
 
     /* Upload-specific */
     const char      *upload_file;
 
     NurlConnPool *pool;
-} NurlRequest;
+    struct NurlStream *stream;
+};
 
 NurlRequest *nurl_request_new(void);
 void         nurl_request_from_args(NurlRequest *req, const char *method,
                                     const char *url, const CommonArgs *a);
 void         nurl_request_free(NurlRequest *req);
+
+/* Internal request building helpers */
+nurl_err_t nurl_headermap_apply_auth(NurlHeaderMap *m, const CommonArgs *a);
+nurl_err_t nurl_headermap_apply_common(NurlHeaderMap *m, const CommonArgs *a);
 
 #endif /* NURL_ENGINE_REQUEST_H */
