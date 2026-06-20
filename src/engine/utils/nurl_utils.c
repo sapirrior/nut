@@ -205,7 +205,11 @@ char *nurl_utils_read_stdin(size_t *out_len) {
 
         size_t read_bytes = fread(buffer + length, 1, bytes_to_read, stdin);
         if (read_bytes == 0) {
-            break; // EOF or error
+            if (ferror(stdin)) {
+                free(buffer);
+                return NULL;
+            }
+            break; // EOF
         }
         length += read_bytes;
     }

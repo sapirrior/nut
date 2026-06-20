@@ -77,7 +77,7 @@ nurl_err_t nurl_http_request(
         }
     }
     if (!has_connection) {
-        if (!nurl_buf_printf(&req_buf, "Connection: %s\r\n", p->http10 ? "close" : "close")) {
+        if (!nurl_buf_printf(&req_buf, "Connection: %s\r\n", p->http10 ? "close" : "keep-alive")) {
             nurl_buf_free(&req_buf);
             return NURL_ERR_OOM;
         }
@@ -170,10 +170,12 @@ nurl_err_t nurl_http_request(
     char *version = strchr(line_buf, ' ');
     if (version) {
         version++;
-        res->status_code = atoi(version);
-        char *status_text_start = strchr(version, ' ');
+        char *code_end = NULL;
+        long status_code_l = strtol(version, &code_end, 10);
+        res->status_code = (code_end != version && status_code_l >= 100 && status_code_l <= 999)
+                           ? (int)status_code_l : 0;
+        char *status_text_start = code_end && *code_end == ' ' ? code_end + 1 : NULL;
         if (status_text_start) {
-            status_text_start++;
             // Trim \r\n
             char *ptr = status_text_start;
             while (*ptr && *ptr != '\r' && *ptr != '\n') ptr++;
@@ -273,7 +275,7 @@ nurl_err_t nurl_http_request(
         size_t body_len = 0;
         unsigned char *body_buf = NULL;
         if (!p->body_out) {
-            body_buf = malloc(body_cap);
+            body_buf = malloc(body_cap + 1); /* +1 for null terminator */
             if (!body_buf) {
                 nurl_http_response_free(res);
                 return NURL_ERR_OOM;
@@ -321,9 +323,9 @@ nurl_err_t nurl_http_request(
                 if (p->body_out) {
                     fwrite(chunk_buf, 1, n, p->body_out);
                 } else {
-                    if (body_len + n >= body_cap) {
-                        body_cap = (body_cap + n) * 2;
-                        unsigned char *temp = realloc(body_buf, body_cap);
+                    if (body_len + n + 1 >= body_cap) {
+                        body_cap = (body_cap + n + 1) * 2;
+                        unsigned char *temp = realloc(body_buf, body_cap + 1);
                         if (!temp) {
                             free(body_buf);
                             nurl_http_response_free(res);
@@ -358,7 +360,7 @@ nurl_err_t nurl_http_request(
         size_t body_len = 0;
         unsigned char *body_buf = NULL;
         if (!p->body_out) {
-            body_buf = malloc(content_len + 1);
+            body_buf = malloc(content_len + 1); /* +1 for null terminator */
             if (!body_buf) {
                 nurl_http_response_free(res);
                 return NURL_ERR_OOM;
@@ -397,7 +399,7 @@ nurl_err_t nurl_http_request(
         size_t body_len = 0;
         unsigned char *body_buf = NULL;
         if (!p->body_out) {
-            body_buf = malloc(body_cap);
+            body_buf = malloc(body_cap + 1); /* +1 for null terminator */
             if (!body_buf) {
                 nurl_http_response_free(res);
                 return NURL_ERR_OOM;
@@ -415,9 +417,9 @@ nurl_err_t nurl_http_request(
             if (p->body_out) {
                 fwrite(chunk_buf, 1, n, p->body_out);
             } else {
-                if (body_len + n >= body_cap) {
-                    body_cap = (body_cap + n) * 2;
-                    unsigned char *temp = realloc(body_buf, body_cap);
+                if (body_len + n + 1 >= body_cap) {
+                    body_cap = (body_cap + n + 1) * 2;
+                    unsigned char *temp = realloc(body_buf, body_cap + 1);
                     if (!temp) {
                         free(body_buf);
                         nurl_http_response_free(res);

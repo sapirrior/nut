@@ -36,6 +36,9 @@ void nurl_progress_update(unsigned long downloaded, unsigned long total, bool fi
                 (double)downloaded / (1024.0 * 1024.0),
                 speed_mb);
         }
+        if (finished) {
+            fprintf(stderr, "\n");
+        }
         fflush(stderr);
     }
 }

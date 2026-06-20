@@ -21,9 +21,6 @@ PREFIX ?= /usr/local
 
 all: $(TARGET)
 
-debug: CFLAGS += -g -O0 -DDEBUG
-debug: all
-
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) -o $@
 

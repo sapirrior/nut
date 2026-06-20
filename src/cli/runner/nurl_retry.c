@@ -1,6 +1,7 @@
 #include "nurl_retry.h"
 #include "compat/nurl_compat.h"
 #include "utils/nurl_utils.h"
+#include "errors/nurl_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -19,12 +20,12 @@ int execute_with_retry(NurlCtx *ctx, NurlRequest *req, const CommonArgs *common,
         if (engine_err == NURL_OK && *out_res) {
             should_retry = ((*out_res)->status_code >= 500);
             if (should_retry && attempt < max_retries && !common->silent) {
-                fprintf(stderr, "nurl: Warning: HTTP %d. Retrying...\n", (*out_res)->status_code);
+                nurl_diag_warn("HTTP %d. Retrying...", (*out_res)->status_code);
             }
         } else {
             should_retry = (engine_err == NURL_ERR_TIMEOUT || engine_err == NURL_ERR_NETWORK);
             if (should_retry && attempt < max_retries && !common->silent) {
-                fprintf(stderr, "nurl: Warning: Request failed (error %d). Retrying...\n", engine_err);
+                nurl_diag_warn("Request failed (error %d). Retrying...", engine_err);
             }
         }
 

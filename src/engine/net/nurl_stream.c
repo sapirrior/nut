@@ -45,7 +45,7 @@ static void throttle(NurlStream *s, size_t bytes) {
 
     if (now - s->last_throttle_time >= 1.0) {
         s->last_throttle_time = now;
-        s->bytes_this_sec = (s->bytes_this_sec > s->limit_rate) ? s->limit_rate : 0;
+        s->bytes_this_sec = 0;
     }
 
     if (s->bytes_this_sec >= s->limit_rate) {

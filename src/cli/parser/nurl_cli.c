@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
-#include <strings.h>
 #include <ctype.h>
 
 void nurl_cli_init_args(CommonArgs *args) {
@@ -63,8 +62,7 @@ static int parse_non_negative_int(const char *optarg, const char *name) {
     return (int)v;
 }
 
-int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char **url) {
-    (void)command; // Unused in flag-only model
+int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **url) {
     nurl_cli_init_args(args);
     static struct option long_options[] = {
         {"user", 1, 0, 'u'}, {"bearer", 1, 0, 1}, {"token", 1, 0, 2}, {"no-auth", 0, 0, 3},
@@ -79,7 +77,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"retry", 1, 0, 19}, {"retry-delay", 1, 0, 20}, {"referer", 1, 0, 'e'}, {"fail", 0, 0, 'f'},
         {"tls1.2", 0, 0, 21}, {"tls1.3", 0, 0, 22}, {"method", 1, 0, 'X'}, {"upload", 1, 0, 23},
         {"connect-timeout", 1, 0, 24}, {"download", 0, 0, 'D'}, {"ping", 0, 0, 25}, {"resolve", 0, 0, 26},
-        {"max-redirects", 1, 0, 28}, {"max-redirs", 1, 0, 28}, {"fail-with-body", 0, 0, 29}, {"head", 0, 0, 'I'}, {"http1.0", 0, 0, 30}, {"dump-header", 1, 0, 31}, {"connect-to", 1, 0, 32}, {"limit-rate", 1, 0, 33}, {0, 0, 0, 0}
+        {"max-redirects", 1, 0, 28}, {"max-redirs", 1, 0, 28}, {"fail-with-body", 0, 0, 29}, {"head", 0, 0, 'I'}, {"http1.0", 0, 0, 30}, {"dump-header", 1, 0, 31}, {"connect-to", 1, 0, 32}, {"limit-rate", 1, 0, 33}, {"dry-run", 0, 0, 27}, {0, 0, 0, 0}
         };
 
     int opt; opterr = 0;
@@ -156,21 +154,21 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             }
             case 'I': if (args->method) free(args->method); args->method = strdup("HEAD"); args->include = true; break;
             case 'V': printf("nurl %s\n", NURL_VERSION); exit(0);
-            case 'h': return -1;
-            default:  nurl_diag_err("option '%s' unrecognized.", argv[optind - 1]);
-                      nurl_diag_hint("run 'nurl --help' for usage."); return -1;
+            case 'h': return -1; // -1 indicates explicit help request
+            default:  nurl_diag_err("option unrecognized or invalid.");
+                      nurl_diag_hint("run 'nurl --help' for usage."); return NURL_ERR_ARG;
         }
     }
 
-    if (args->tls12 && args->tls13) { nurl_diag_err("conflicting TLS versions"); return -1; }
-    if (args->ping && args->dry_run) { nurl_diag_err("--ping and --dry-run are mutually exclusive"); return -1; }
-    if (args->ping && args->download) { nurl_diag_err("--ping and --download are mutually exclusive"); return -1; }
-    if (args->resolve && args->download) { nurl_diag_err("--resolve and --download are mutually exclusive"); return -1; }
-    if (args->no_verify && args->cacert) { fprintf(stderr, "nurl: Warning: --insecure and --cacert used together. --cacert takes precedence.\n"); }
-    if (args->resume && !args->download && !args->output) { nurl_diag_err("--resume requires --download or -o"); return -1; }
+    if (args->tls12 && args->tls13) { nurl_diag_err("conflicting TLS versions"); return NURL_ERR_ARG; }
+    if (args->ping && args->dry_run) { nurl_diag_err("--ping and --dry-run are mutually exclusive"); return NURL_ERR_ARG; }
+    if (args->ping && args->download) { nurl_diag_err("--ping and --download are mutually exclusive"); return NURL_ERR_ARG; }
+    if (args->resolve && args->download) { nurl_diag_err("--resolve and --download are mutually exclusive"); return NURL_ERR_ARG; }
+    if (args->no_verify && args->cacert) { nurl_diag_warn("--insecure and --cacert used together; --cacert takes precedence."); }
+    if (args->resume && !args->download && !args->output) { nurl_diag_err("--resume requires --download or -o"); return NURL_ERR_ARG; }
 
     int rem = argc - optind;
-    if (rem <= 0) { nurl_diag_err("no URL specified!"); return -1; }
+    if (rem <= 0) { nurl_diag_err("no URL specified!"); return NURL_ERR_ARG; }
 
     *url = nurl_normalize_url(argv[optind]);
     nurl_cli_infer_method(args);

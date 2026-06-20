@@ -1,5 +1,6 @@
 #include "nurl_net.h"
 #include "nurl_utils.h"
+#include "nurl_buf.h"
 #include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,7 +58,7 @@ int nurl_net_connect_ex(const char *hostname, int port, unsigned int connect_tim
 
     int socket_fd = -1;
     for (rp = result; rp != NULL; rp = rp->ai_next) {
-        socket_fd = (int)socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        socket_fd = (int)(intptr_t)socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (socket_fd == -1) continue;
 
 #ifndef _WIN32
@@ -243,25 +244,31 @@ int nurl_net_connect_proxy_ex(
     }
 
     // HTTP CONNECT Tunneling
-    char connect_req[2048];
-    int req_len = snprintf(connect_req, sizeof(connect_req), "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", target_host, target_port, target_host, target_port);
+    NurlBuf connect_req;
+    nurl_buf_init(&connect_req);
+    nurl_buf_printf(&connect_req, "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", target_host, target_port, target_host, target_port);
     if (allocated_target_host) free(allocated_target_host);
 
     if (proxy_user) {
         char *auth_b64 = nurl_utils_base64_encode((const unsigned char *)proxy_user, strlen(proxy_user));
         if (auth_b64) {
-            req_len += snprintf(connect_req + req_len, sizeof(connect_req) - req_len, "Proxy-Authorization: Basic %s\r\n", auth_b64);
+            nurl_buf_printf(&connect_req, "Proxy-Authorization: Basic %s\r\n", auth_b64);
             free(auth_b64);
         }
     }
 
-    req_len += snprintf(connect_req + req_len, sizeof(connect_req) - req_len, "\r\n");
+    nurl_buf_append(&connect_req, "\r\n", 2);
 
-    if (socket_write(socket_fd, connect_req, req_len) <= 0) {
+    char *req_data = connect_req.data;
+    size_t req_len = connect_req.len;
+
+    if (socket_write(socket_fd, req_data, req_len) <= 0) {
+        nurl_buf_free(&connect_req);
         if (out_err) *out_err = NURL_ERR_NETWORK;
         socket_close(socket_fd);
         return -1;
     }
+    nurl_buf_free(&connect_req);
 
     // Read Response Header (buffered)
     char resp_buf[4096];
@@ -277,7 +284,7 @@ int nurl_net_connect_proxy_ex(
     }
 
     // Verify 2xx response
-    if (strstr(resp_buf, "HTTP/1.1 200") == NULL && strstr(resp_buf, "HTTP/1.0 200") == NULL) {
+    if (strstr(resp_buf, " 200") == NULL) {
         if (out_err) *out_err = NURL_ERR_PROXY;
         socket_close(socket_fd);
         return -1;

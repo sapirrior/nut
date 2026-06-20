@@ -30,6 +30,7 @@ static bool has_header(char **headers, size_t count, const char *key) {
 void nurl_config_load_and_merge(CommonArgs *args) {
     char *config_path = getenv("NURL_CONFIG");
     char *allocated_path = NULL;
+    bool explicitly_set = (config_path != NULL);
 
     if (!config_path) {
         char *home = getenv("HOME");
@@ -48,7 +49,7 @@ void nurl_config_load_and_merge(CommonArgs *args) {
     FILE *f = fopen(config_path, "r");
     if (!f) {
         // Only warn if explicitly set via env var
-        if (getenv("NURL_CONFIG")) {
+        if (explicitly_set) {
             nurl_diag_warn("could not open config file '%s': %s", config_path, strerror(errno));
         }
         free(allocated_path);

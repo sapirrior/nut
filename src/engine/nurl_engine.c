@@ -61,6 +61,42 @@ int nurl_engine_execute_request(
 
     nurl_http_response_t *res = NULL;
 
+    nurl_cookie_jar_t *loaded_jar = NULL;
+    bool jar_loaded = false;
+
+    if (req->cookie) {
+        if (req->cookie[0] == '@') {
+            loaded_jar = nurl_cookie_jar_load(req->cookie + 1);
+            if (loaded_jar) jar_loaded = true;
+        }
+    }
+
+    if (req->session) {
+        nurl_cookie_jar_t *s_jar = nurl_cookie_jar_load(req->session);
+        if (s_jar) {
+            if (jar_loaded) {
+                for (size_t i = 0; i < s_jar->count; i++) {
+                    nurl_cookie_jar_add(loaded_jar, &s_jar->cookies[i]);
+                }
+                nurl_cookie_jar_free(s_jar);
+            } else {
+                loaded_jar = s_jar;
+                jar_loaded = true;
+            }
+        }
+    }
+
+    const char *save_path = req->cookie_jar ? req->cookie_jar : req->session;
+    if (save_path && !loaded_jar) {
+        loaded_jar = nurl_cookie_jar_load(save_path);
+        if (!loaded_jar) {
+            loaded_jar = nurl_cookie_jar_create();
+        }
+        if (loaded_jar) jar_loaded = true;
+    }
+
+    int return_code = NURL_OK;
+
     while (true) {
         char *scheme = NULL;
         char *host = NULL;
@@ -69,7 +105,8 @@ int nurl_engine_execute_request(
 
         if (nurl_utils_parse_url(current_url, &scheme, &host, &port, &path) != 0) {
             free(current_url);
-            return NURL_ERR_URL;
+            return_code = NURL_ERR_URL;
+            goto cleanup_jar;
         }
 
         bool use_tls = (nurl_strcasecmp(scheme, "https") == 0);
@@ -83,7 +120,8 @@ int nurl_engine_execute_request(
             nurl_err_t acquire_err = nurl_pool_acquire(req->pool, host, port, use_tls, req, &stream);
             if (acquire_err != NURL_OK) {
                 free(scheme); free(host); free(path); free(current_url);
-                return acquire_err;
+                return_code = acquire_err;
+                goto cleanup_jar;
             }
             tls = stream->tls;
             sock_fd = stream->fd;
@@ -93,7 +131,8 @@ int nurl_engine_execute_request(
             sock_fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, req->connect_to, req->connect_timeout_sec, &conn_err);
             if (sock_fd < 0) {
                 free(scheme); free(host); free(path); free(current_url);
-                return conn_err;
+                return_code = conn_err;
+                goto cleanup_jar;
             }
             if (out_stats && redirects_followed == 0) {
                 out_stats->connect_time_sec = nurl_utils_get_time_sec() - conn_start;
@@ -109,7 +148,8 @@ int nurl_engine_execute_request(
                 if (!tls) {
                     nurl_net_close(sock_fd);
                     free(scheme); free(host); free(path); free(current_url);
-                    return NURL_ERR_TLS;
+                    return_code = NURL_ERR_TLS;
+                    goto cleanup_jar;
                 }
 
                 // Stage 3: TLS Handshake
@@ -117,7 +157,8 @@ int nurl_engine_execute_request(
                     nurl_tls_free(tls);
                     nurl_net_close(sock_fd);
                     free(scheme); free(host); free(path); free(current_url);
-                    return NURL_ERR_TLS_HANDSHAKE;
+                    return_code = NURL_ERR_TLS_HANDSHAKE;
+                    goto cleanup_jar;
                 }
             }
 
@@ -126,7 +167,8 @@ int nurl_engine_execute_request(
                 if (tls) nurl_tls_free(tls);
                 nurl_net_close(sock_fd);
                 free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_OOM;
+                return_code = NURL_ERR_OOM;
+                goto cleanup_jar;
             }
         }
 
@@ -144,7 +186,8 @@ int nurl_engine_execute_request(
                 nurl_stream_free(stream);
             }
             free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_OOM;
+            return_code = NURL_ERR_OOM;
+            goto cleanup_jar;
         }
 
         // Copy base headers
@@ -159,31 +202,6 @@ int nurl_engine_execute_request(
         }
 
         // Dynamic Cookie compilation
-        nurl_cookie_jar_t *loaded_jar = NULL;
-        bool jar_loaded = false;
-
-        if (req->cookie) {
-            if (req->cookie[0] == '@') {
-                loaded_jar = nurl_cookie_jar_load(req->cookie + 1);
-                if (loaded_jar) jar_loaded = true;
-            }
-        }
-
-        if (req->session) {
-            nurl_cookie_jar_t *s_jar = nurl_cookie_jar_load(req->session);
-            if (s_jar) {
-                if (jar_loaded) {
-                    for (size_t i = 0; i < s_jar->count; i++) {
-                        nurl_cookie_jar_add(loaded_jar, &s_jar->cookies[i]);
-                    }
-                    nurl_cookie_jar_free(s_jar);
-                } else {
-                    loaded_jar = s_jar;
-                    jar_loaded = true;
-                }
-            }
-        }
-
         NurlBuf cookie_buf;
         nurl_buf_init(&cookie_buf);
 
@@ -192,8 +210,12 @@ int nurl_engine_execute_request(
         }
 
         if (jar_loaded && loaded_jar) {
+            unsigned long now_time = (unsigned long)time(NULL);
             for (size_t i = 0; i < loaded_jar->count; i++) {
                 nurl_cookie_t *c = &loaded_jar->cookies[i];
+                if (c->expiry != 0 && c->expiry < now_time) {
+                    continue;
+                }
                 if (c->domain && !cookie_domain_matches(c->domain, host)) {
                     continue;
                 }
@@ -214,8 +236,6 @@ int nurl_engine_execute_request(
             nurl_buf_free(&cookie_buf);
         }
 
-        if (loaded_jar) nurl_cookie_jar_free(loaded_jar);
-
         char *extra_hdr = nurl_headermap_serialize(temp_hdrs);
         nurl_headermap_free(temp_hdrs);
 
@@ -228,7 +248,8 @@ int nurl_engine_execute_request(
                 nurl_stream_free(stream);
             }
             free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_OOM;
+            return_code = NURL_ERR_OOM;
+            goto cleanup_jar;
         }
 
         const char *proto = tls ? nurl_tls_get_negotiated_proto(tls) : "none";
@@ -288,7 +309,8 @@ int nurl_engine_execute_request(
                 nurl_stream_free(stream);
             }
             free(scheme); free(host); free(path); free(current_url);
-            return http_err;
+            return_code = http_err;
+            goto cleanup_jar;
         }
 
         // Handle decompression if Accept-Encoding was requested
@@ -317,100 +339,92 @@ int nurl_engine_execute_request(
                     fprintf(stderr, "nurl: Failed to decompress response payload.\n");
                     nurl_http_response_free(res);
                     free(scheme); free(host); free(path); free(current_url);
-                    return NURL_ERR_GENERIC;
+                    return_code = NURL_ERR_GENERIC;
+                    goto cleanup_jar;
                 }
             }
         }
 
         // Extract Set-Cookie headers and save to jar
-        const char *save_path = req->cookie_jar ? req->cookie_jar : req->session;
-        if (save_path && res) {
-            nurl_cookie_jar_t *save_jar = nurl_cookie_jar_load(save_path);
-            if (!save_jar) {
-                save_jar = nurl_cookie_jar_create();
-            }
+        if (save_path && res && loaded_jar) {
+            for (size_t i = 0; i < res->header_count; i++) {
+                if (nurl_strncasecmp(res->headers[i], "Set-Cookie:", 11) == 0) {
+                    char *val = strdup(res->headers[i] + 11);
+                    if (!val) continue;
 
-            if (save_jar) {
-                for (size_t i = 0; i < res->header_count; i++) {
-                    if (nurl_strncasecmp(res->headers[i], "Set-Cookie:", 11) == 0) {
-                        char *val = strdup(res->headers[i] + 11);
-                        if (!val) continue;
-
-                        char *parts[32];
-                        size_t part_count = 0;
-                        char *tok = val;
-                        while (part_count < 32) {
-                            char *semi = strchr(tok, ';');
-                            if (semi) {
-                                *semi = '\0';
-                                parts[part_count++] = tok;
-                                tok = semi + 1;
-                            } else {
-                                parts[part_count++] = tok;
-                                break;
-                            }
+                    char *parts[32];
+                    size_t part_count = 0;
+                    char *tok = val;
+                    while (part_count < 32) {
+                        char *semi = strchr(tok, ';');
+                        if (semi) {
+                            *semi = '\0';
+                            parts[part_count++] = tok;
+                            tok = semi + 1;
+                        } else {
+                            parts[part_count++] = tok;
+                            break;
                         }
+                    }
 
-                        if (part_count > 0) {
-                            char *eq = strchr(parts[0], '=');
-                            if (eq) {
-                                *eq = '\0';
-                                char *name = nurl_utils_trim(parts[0]);
-                                char *value = nurl_utils_trim(eq + 1);
-                                char *domain = NULL;
-                                char *cookie_path = NULL;
-                                bool secure = false;
+                    if (part_count > 0) {
+                        char *eq = strchr(parts[0], '=');
+                        if (eq) {
+                            *eq = '\0';
+                            char *name = nurl_utils_trim(parts[0]);
+                            char *value = nurl_utils_trim(eq + 1);
+                            char *domain = NULL;
+                            char *cookie_path = NULL;
+                            bool secure = false;
 
-                                for (size_t p = 1; p < part_count; p++) {
-                                    char *attr = parts[p];
-                                    char *attr_eq = strchr(attr, '=');
-                                    if (attr_eq) {
-                                        *attr_eq = '\0';
-                                        char *k_attr = nurl_utils_trim(attr);
-                                        char *v_attr = nurl_utils_trim(attr_eq + 1);
-                                        if (nurl_strcasecmp(k_attr, "domain") == 0) {
-                                            if (domain) free(domain);
-                                            domain = strdup(v_attr);
-                                        } else if (nurl_strcasecmp(k_attr, "path") == 0) {
-                                            if (cookie_path) free(cookie_path);
-                                            cookie_path = strdup(v_attr);
-                                        }
-                                    } else {
-                                        char *k_attr = nurl_utils_trim(attr);
-                                        if (nurl_strcasecmp(k_attr, "secure") == 0) {
-                                            secure = true;
-                                        }
+                            for (size_t p = 1; p < part_count; p++) {
+                                char *attr = parts[p];
+                                char *attr_eq = strchr(attr, '=');
+                                if (attr_eq) {
+                                    *attr_eq = '\0';
+                                    char *k_attr = nurl_utils_trim(attr);
+                                    char *v_attr = nurl_utils_trim(attr_eq + 1);
+                                    if (nurl_strcasecmp(k_attr, "domain") == 0) {
+                                        if (domain) free(domain);
+                                        domain = strdup(v_attr);
+                                    } else if (nurl_strcasecmp(k_attr, "path") == 0) {
+                                        if (cookie_path) free(cookie_path);
+                                        cookie_path = strdup(v_attr);
+                                    }
+                                } else {
+                                    char *k_attr = nurl_utils_trim(attr);
+                                    if (nurl_strcasecmp(k_attr, "secure") == 0) {
+                                        secure = true;
                                     }
                                 }
-
-                                if (!domain) {
-                                    domain = strdup(host);
-                                }
-                                if (!cookie_path) {
-                                    cookie_path = strdup("/");
-                                }
-
-                                nurl_cookie_t c;
-                                c.domain = domain;
-                                c.include_subdomains = true;
-                                c.path = cookie_path;
-                                c.secure = secure;
-                                c.expiry = 0;
-                                c.name = name;
-                                c.value = value;
-
-                                nurl_cookie_jar_add(save_jar, &c);
-
-                                free(domain);
-                                free(cookie_path);
                             }
+
+                            if (!domain) {
+                                domain = strdup(host);
+                            }
+                            if (!cookie_path) {
+                                cookie_path = strdup("/");
+                            }
+
+                            nurl_cookie_t c;
+                            c.domain = domain;
+                            c.include_subdomains = true;
+                            c.path = cookie_path;
+                            c.secure = secure;
+                            c.expiry = 0;
+                            c.name = name;
+                            c.value = value;
+
+                            nurl_cookie_jar_add(loaded_jar, &c);
+
+                            free(domain);
+                            free(cookie_path);
                         }
-                        free(val);
                     }
+                    free(val);
                 }
-                nurl_cookie_jar_save(save_jar, save_path);
-                nurl_cookie_jar_free(save_jar);
             }
+            nurl_cookie_jar_save(loaded_jar, save_path);
         }
 
         if (req->verbose && !req->silent) {
@@ -460,7 +474,8 @@ int nurl_engine_execute_request(
                 if (redirects_followed >= max_redirects) {
                     nurl_diag_err("maximum redirect limit exceeded (%d).", max_redirects);
                     free(current_url);
-                    return NURL_ERR_GENERIC;
+                    return_code = NURL_ERR_GENERIC;
+                    goto cleanup_jar;
                 }
                 continue;
             }
@@ -507,5 +522,8 @@ int nurl_engine_execute_request(
         out_stats->num_redirects = redirects_followed;
     }
 
-    return NURL_OK;
+cleanup_jar:
+    if (loaded_jar) nurl_cookie_jar_free(loaded_jar);
+
+    return return_code;
 }

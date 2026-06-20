@@ -110,6 +110,60 @@ output=$(${NURL} "${HTTPBIN}/headers" -A "nurl-test-agent" -s)
 echo "$output" | grep -q "nurl-test-agent" || fail "User-Agent not sent correctly"
 pass "User-Agent Customization"
 
+# 11. Test Expired Cookies Filtering (Hardcore check)
+echo -n "Test 11: Expired Cookies Filtering... "
+cookie_file="expired_cookies.txt"
+rm -f "$cookie_file"
+# Create a cookie jar file with one expired cookie and one valid cookie
+# Format: domain \t include_subdomains \t path \t secure \t expiry \t name \t value
+# We set one expiry to 10 (long time ago, expired) and one to 2147483647 (far future, valid)
+printf "postman-echo.com\tTRUE\t/\tFALSE\t10\texpired_cookie\tshould_be_skipped\n" > "$cookie_file"
+printf "postman-echo.com\tTRUE\t/\tFALSE\t2147483647\tvalid_cookie\tshould_be_sent\n" >> "$cookie_file"
+
+output=$(${NURL} "${HTTPBIN}/cookies" -b "@$cookie_file" -s)
+echo "$output" | grep -q "valid_cookie" || fail "Valid cookie was not sent"
+if echo "$output" | grep -q "expired_cookie"; then
+    rm -f "$cookie_file"
+    fail "Expired cookie was sent but should have been filtered out"
+fi
+rm -f "$cookie_file"
+pass "Expired Cookies Filtering"
+
+# 12. Test Compression / Gzip Decompression
+echo -n "Test 12: Compression / Gzip Decompression... "
+# Request gzip compressed response and ensure it gets decompressed
+status=$(${NURL} "${HTTPBIN}/gzip" --gzip -w '%{http_code}' -o /dev/null -s)
+[ "$status" = "200" ] || fail "Gzip request expected 200, got $status"
+output=$(${NURL} "${HTTPBIN}/gzip" --gzip -s)
+echo "$output" | grep -q '"gzipped": true' || fail "Gzip response decompression failed or was not parsed"
+pass "Compression / Gzip Decompression"
+
+# 13. Test Rate Limiting
+echo -n "Test 13: Rate Limiting... "
+# Download something with a very low rate limit and verify it takes a significant fraction of time
+start_time=$(date +%s)
+# Read a small size but limit rate to 500 bytes per sec (should take at least 1-2 seconds)
+${NURL} "${HTTPBIN}/bytes/1000" --limit-rate 500 -o /dev/null -s
+end_time=$(date +%s)
+elapsed=$((end_time - start_time))
+if [ $elapsed -lt 1 ]; then
+    fail "Rate limit did not throttle execution (elapsed $elapsed sec)"
+fi
+pass "Rate Limiting"
+
+# 14. Test Connect Timeout (Force timeout target)
+echo -n "Test 14: Connect Timeout... "
+# Use a non-routable IP address like 10.255.255.1 to force a timeout, with a 1 second connect timeout limit
+set +e
+${NURL} "http://10.255.255.1:81" --connect-timeout 1 -s > /dev/null 2>&1
+ret=$?
+set -e
+# Exit code should be NURL_ERR_TIMEOUT (28) or NURL_ERR_CONNECT (8) or NURL_ERR_NETWORK (2)
+if [ $ret -ne 28 ] && [ $ret -ne 8 ] && [ $ret -ne 2 ]; then
+    fail "Connect timeout did not exit with expected timeout/network code, got $ret"
+fi
+pass "Connect Timeout"
+
 echo -e "\n${GREEN}All enhanced integration tests passed successfully!${NC}"
 
 

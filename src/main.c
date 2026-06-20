@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <signal.h>
 #include "nurl.h"
 #include "nurl_cli.h"
 #include "nurl_dispatch.h"
@@ -75,8 +76,6 @@ static void print_help(const char *prog_name) {
     printf("  -h, --help            Print this help dialogue\n");
 }
 
-#include <signal.h>
-
 int main(int argc, char **argv) {
 #ifndef _WIN32
     signal(SIGPIPE, SIG_IGN);
@@ -87,14 +86,15 @@ int main(int argc, char **argv) {
     }
 
     CommonArgs args;
-    char *command = NULL;
     char *url = NULL;
 
-    int parse_res = nurl_cli_parse(argc, argv, &args, &command, &url);
+    int parse_res = nurl_cli_parse(argc, argv, &args, &url);
     if (parse_res != 0) {
         if (parse_res == -1) {
             print_help(argv[0]);
-            parse_res = 0; // Exit with 0 on help
+            nurl_cli_free_args(&args);
+            nurl_net_cleanup();
+            return 0; // Exit with 0 on help
         }
         nurl_cli_free_args(&args);
         nurl_net_cleanup();
@@ -127,7 +127,6 @@ int main(int argc, char **argv) {
     nurl_ctx_destroy(ctx);
 
     free(method);
-    free(command);
     free(url);
     nurl_cli_free_args(&args);
     nurl_net_cleanup();

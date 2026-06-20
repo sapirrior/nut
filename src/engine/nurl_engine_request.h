@@ -71,9 +71,6 @@ struct NurlRequest {
     nurl_req_headers_cb header_cb;
     void            *header_data;
 
-    /* Upload-specific */
-    const char      *upload_file;
-
     NurlConnPool *pool;
     struct NurlStream *stream;
 };

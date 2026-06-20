@@ -4,6 +4,7 @@
 #include "nurl_retry.h"
 #include "nurl_progress.h"
 #include "net/nurl_stream.h"
+#include "net/nurl_net.h"
 #include "utils/nurl_utils.h"
 #include "utils/nurl_buf.h"
 #include "errors/nurl_diag.h"
@@ -17,6 +18,7 @@
 #include <ctype.h>
 #include <errno.h>
 
+/* Platform-portable way to get remote peer info — uses nurl_net layer */
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -111,6 +113,21 @@ static void handle_write_out(const char *template, const nurl_http_response_t *r
     free(out);
 }
 
+void dump_headers_to_file(const char *filename, const nurl_http_response_t *res) {
+    if (!filename || !res) return;
+    FILE *hf = fopen(filename, "w");
+    if (hf) {
+        fprintf(hf, "HTTP/1.1 %d %s\r\n", res->status_code, res->status_text);
+        for (size_t i = 0; i < res->header_count; i++) {
+            fprintf(hf, "%s\r\n", res->headers[i]);
+        }
+        fprintf(hf, "\r\n");
+        fclose(hf);
+    } else {
+        nurl_diag_warn("could not open header dump file '%s': %s", filename, strerror(errno));
+    }
+}
+
 int nurl_request_generic(NurlCtx *ctx, const char *method, const char *url, const CommonArgs *common) {
     double start_time = nurl_utils_get_time_sec();
 
@@ -143,25 +160,14 @@ int nurl_request_generic(NurlCtx *ctx, const char *method, const char *url, cons
         return engine_err;
     }
 
-    nurl_request_free(req);
-
     if (!res) {
+        nurl_request_free(req);
         if (effective_url) free(effective_url);
         return NURL_ERR_GENERIC;
     }
 
     if (common->dump_header) {
-        FILE *hf = fopen(common->dump_header, "w");
-        if (hf) {
-            fprintf(hf, "HTTP/1.1 %d %s\r\n", res->status_code, res->status_text);
-            for (size_t i = 0; i < res->header_count; i++) {
-                fprintf(hf, "%s\r\n", res->headers[i]);
-            }
-            fprintf(hf, "\r\n");
-            fclose(hf);
-        } else {
-            nurl_diag_warn("could not open header dump file '%s': %s", common->dump_header, strerror(errno));
-        }
+        dump_headers_to_file(common->dump_header, res);
     }
 
     bool is_error_status = (res->status_code >= 400);
@@ -181,6 +187,7 @@ int nurl_request_generic(NurlCtx *ctx, const char *method, const char *url, cons
             FILE *f = is_stdout ? stdout : fopen(common->output, "wb");
             if (!f) {
                 nurl_diag_err("could not open '%s' for writing: %s", common->output, strerror(errno));
+                nurl_request_free(req);
                 nurl_http_response_free(res);
                 free(effective_url);
                 return NURL_ERR_IO;
@@ -200,8 +207,12 @@ int nurl_request_generic(NurlCtx *ctx, const char *method, const char *url, cons
     double elapsed_sec = nurl_utils_get_time_sec() - start_time;
 
     if (common->write_out && !should_suppress_output) {
+        /* req must be alive here for remote_ip/remote_port lookups */
         handle_write_out(common->write_out, res, method, effective_url ? effective_url : url, elapsed_sec, &stats, req);
     }
+
+    /* Free req AFTER handle_write_out, which may access req->stream */
+    nurl_request_free(req);
 
     int ret_code = NURL_OK;
     if (res->status_code >= 500) {

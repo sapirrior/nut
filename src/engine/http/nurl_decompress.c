@@ -16,7 +16,7 @@ unsigned char *nurl_decompress_gzip_deflate(const unsigned char *src, size_t src
     strm.avail_in = src_len;
 
     size_t dest_cap = src_len * 2 + 1024;
-    unsigned char *dest = malloc(dest_cap);
+    unsigned char *dest = malloc(dest_cap + 1); /* +1 for null terminator */
     if (!dest) {
         inflateEnd(&strm);
         return NULL;
@@ -38,7 +38,7 @@ unsigned char *nurl_decompress_gzip_deflate(const unsigned char *src, size_t src
         if (strm.avail_out == 0) {
             size_t bytes_written = dest_cap - strm.avail_out;
             dest_cap *= 2;
-            unsigned char *temp = realloc(dest, dest_cap);
+            unsigned char *temp = realloc(dest, dest_cap + 1); /* +1 for null terminator */
             if (!temp) {
                 free(dest);
                 inflateEnd(&strm);

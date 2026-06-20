@@ -34,7 +34,16 @@ src/
 
 ## 2. Smart Error DX (Developer Experience)
 
-`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints:
+`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints.
+
+Furthermore, syntax errors or invalid flags output specific error diagnostics rather than dumping the entire help dialogue:
+
+```text
+nurl: error: option unrecognized or invalid.
+      hint: run 'nurl --help' for usage.
+```
+
+If a network or file operation fails, `nurl` provides a friendly diagnostic:
 
 ```text
 nurl: error: network connection reset or interrupted during the request to 'https://api.example.com'

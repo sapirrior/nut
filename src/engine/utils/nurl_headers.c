@@ -35,10 +35,17 @@ static nurl_err_t headermap_grow(NurlHeaderMap *m) {
     if (m->count >= m->capacity) {
         size_t new_cap = m->capacity == 0 ? 8 : m->capacity * 2;
         char **new_keys = realloc(m->keys, new_cap * sizeof(char *));
+        if (!new_keys) return NURL_ERR_OOM;
         char **new_values = realloc(m->values, new_cap * sizeof(char *));
-        if (!new_keys || !new_values) {
-            if (new_keys) m->keys = new_keys;
-            if (new_values) m->values = new_values;
+        if (!new_values) {
+            // Keep keys block if possible, but don't commit to the new size/capacity
+            // Reallocating new_keys back to original size is optional, but leaving it grown
+            // is fine as long as m->keys is updated to new_keys (otherwise it would leak or be dangling).
+            // Actually, if new_values fails, we shouldn't update capacity.
+            // Let's keep new_keys since it succeeded, but we must update m->keys to new_keys
+            // so we don't have a dangling/lost pointer, or we could just roll back.
+            // A simpler way: update m->keys to new_keys so it's not lost.
+            m->keys = new_keys;
             return NURL_ERR_OOM;
         }
         m->keys = new_keys;

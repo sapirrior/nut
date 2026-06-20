@@ -18,11 +18,4 @@ typedef enum {
     NURL_ERR_ARG       = 3,   /* curl exit 3: Bad CLI argument */
     NURL_ERR_GENERIC   = 99,
 } nurl_err_t;
-
-/* nurl_err is now a no-op side-effect wise, returning the code only */
-static inline nurl_err_t nurl_err(nurl_err_t code, ...) { return code; }
-
-/* nurl_hint is now a no-op; use nurl_diag_hint instead */
-static inline void nurl_hint(const char *fmt, ...) { (void)fmt; }
-
 #endif /* NURL_ERROR_H */

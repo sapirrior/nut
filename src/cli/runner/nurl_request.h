@@ -9,5 +9,6 @@
  * and outputs the response.
  */
 int nurl_request_generic(NurlCtx *ctx, const char *method, const char *url, const CommonArgs *common);
+void dump_headers_to_file(const char *filename, const nurl_http_response_t *res);
 
 #endif /* NURL_REQUEST_H */

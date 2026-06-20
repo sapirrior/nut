@@ -40,7 +40,7 @@ void nurl_handle_request_error(nurl_err_t err, const NurlRequest *req, const cha
 
         case NURL_ERR_TLS:
         case NURL_ERR_TLS_HANDSHAKE: {
-            const char *tls_err = req->stream ? nurl_tls_last_error(req->stream->tls) : NULL;
+            const char *tls_err = (req && req->stream) ? nurl_tls_last_error(req->stream->tls) : NULL;
             if (tls_err) {
                 nurl_diag_err("TLS failure for '%s': %s", target_url, tls_err);
             } else {

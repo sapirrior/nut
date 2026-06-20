@@ -107,7 +107,7 @@ static int nurl_mode_resolve(const char *url_or_host, const CommonArgs *common) 
             addr = &(ipv6->sin6_addr); record_type = "AAAA";
         }
         inet_ntop(rp->ai_family, addr, ip_str, sizeof(ip_str));
-        printf("%s\t%s\t%s\n", target_host, ip_str, record_type);
+        if (!common->silent) printf("%s\t%s\t%s\n", target_host, ip_str, record_type);
     }
     freeaddrinfo(result); free(target_host); free(scheme); free(host); free(path);
     return found ? 0 : 2;
@@ -158,7 +158,7 @@ static int nurl_mode_ping(const char *url, const CommonArgs *common) {
         if (i < count - 1) nurl_sleep_ms(interval);
     }
 
-    unsigned long min = 999999, max = 0, sum = 0, success = 0;
+    unsigned long min = ULONG_MAX, max = 0, sum = 0, success = 0;
     for (unsigned int i = 0; i < count; i++) {
         if (latencies[i] > 0) {
             if (latencies[i] < min) min = latencies[i];
@@ -170,7 +170,7 @@ static int nurl_mode_ping(const char *url, const CommonArgs *common) {
         printf("\n--- %s ping statistics ---\n%u requests, %u success, %u%% packet loss\nround-trip min/avg/max = %lu/%lu/%lu ms\n", host, count, (unsigned int)success, (unsigned int)((count - success) * 100 / count), min, sum / success, max);
     } else if (!common->silent) printf("\n--- %s ping statistics ---\n%u requests, 0 success, 100%% packet loss\n", host, count);
 
-    free(latencies); nurl_stream_free(stream); nurl_tls_free(t); nurl_net_close(fd);
+    free(latencies); nurl_tls_free(t); nurl_net_close(fd); nurl_stream_free(stream);
     free(scheme); free(host); free(path);
     return 0;
 }
@@ -178,21 +178,25 @@ static int nurl_mode_ping(const char *url, const CommonArgs *common) {
 static char *extract_filename_from_cd(const nurl_http_response_t *res) {
     for (size_t i = 0; i < res->header_count; i++) {
         if (nurl_strncasecmp(res->headers[i], "Content-Disposition:", 20) == 0) {
-            char *fn = strstr(res->headers[i] + 20, "filename=");
+            char *fn = strdup(res->headers[i] + 20);
             if (fn) {
-                fn += 9;
-                char *filename = strdup(fn);
-                if (!filename) return NULL;
-                if (filename[0] == '"') {
-                    memmove(filename, filename + 1, strlen(filename));
-                    char *end = strchr(filename, '"');
-                    if (end) *end = '\0';
+                char *filename = strstr(fn, "filename=");
+                if (filename) {
+                    filename += 9;
+                    if (filename[0] == '"') {
+                        memmove(filename, filename + 1, strlen(filename));
+                        char *end = strchr(filename, '"');
+                        if (end) *end = '\0';
+                    }
+                    // Strip any path traversal or invalid chars for safety
+                    for (char *p = filename; *p; p++) {
+                        if (*p == '/' || *p == '\\') *p = '_';
+                    }
+                    char *ret = strdup(filename);
+                    free(fn);
+                    return ret;
                 }
-                // Strip any path traversal or invalid chars for safety
-                for (char *p = filename; *p; p++) {
-                    if (*p == '/' || *p == '\\') *p = '_';
-                }
-                return filename;
+                free(fn);
             }
         }
     }
@@ -225,21 +229,6 @@ static void nurl_download_header_cb(NurlRequest *req, const nurl_http_response_t
         }
     } else {
         req->out = stdout;
-    }
-}
-
-static void dump_headers(const char *filename, const nurl_http_response_t *res) {
-    if (!filename || !res) return;
-    FILE *hf = fopen(filename, "w");
-    if (hf) {
-        fprintf(hf, "HTTP/1.1 %d %s\r\n", res->status_code, res->status_text);
-        for (size_t i = 0; i < res->header_count; i++) {
-            fprintf(hf, "%s\r\n", res->headers[i]);
-        }
-        fprintf(hf, "\r\n");
-        fclose(hf);
-    } else {
-        nurl_diag_warn("could not open header dump file '%s': %s", filename, strerror(errno));
     }
 }
 
@@ -288,7 +277,7 @@ static int nurl_mode_download(NurlCtx *ctx, const char *url, const CommonArgs *c
     int err = execute_with_retry(ctx, req, common, &res, &effective_url, &stats);
     if (req->out && !is_stdout) fclose(req->out);
 
-    if (res && common->dump_header) dump_headers(common->dump_header, res);
+    if (res && common->dump_header) dump_headers_to_file(common->dump_header, res);
 
     if (err != NURL_OK && !common->silent) nurl_handle_request_error(err, req, effective_url ? effective_url : url);
     else if (res && !common->silent && res->status_code >= 400) nurl_handle_request_error(res->status_code >= 500 ? NURL_ERR_HTTP_5XX : NURL_ERR_HTTP_4XX, req, effective_url ? effective_url : url);
@@ -305,10 +294,10 @@ static int nurl_mode_upload(NurlCtx *ctx, const char *url, const CommonArgs *com
 
     nurl_http_response_t *res = NULL; char *eff_url = NULL; NurlOperationStats stats = {0};
     NurlRequest *req = nurl_request_new();
-    nurl_request_from_args(req, "POST", url, common);
+    nurl_request_from_args(req, common->method ? common->method : "POST", url, common);
 
     int err = execute_with_retry(ctx, req, common, &res, &eff_url, &stats);
-    if (res && common->dump_header) dump_headers(common->dump_header, res);
+    if (res && common->dump_header) dump_headers_to_file(common->dump_header, res);
     if (err != NURL_OK && !common->silent) nurl_handle_request_error(err, req, eff_url ? eff_url : url);
     else if (res && !common->silent && res->status_code >= 400) nurl_handle_request_error(res->status_code >= 500 ? NURL_ERR_HTTP_5XX : NURL_ERR_HTTP_4XX, req, eff_url ? eff_url : url);
 

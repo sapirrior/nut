@@ -24,32 +24,59 @@ NurlMultipart *nurl_multipart_new(void) {
     NurlMultipart *m = calloc(1, sizeof(NurlMultipart));
     if (!m) return NULL;
 
-    // Generate a random boundary
-    unsigned int r1 = (unsigned int)time(NULL);
-    unsigned int r2 = (unsigned int)rand();
-    snprintf(m->boundary, sizeof(m->boundary), "------------------------%08x%08x", r1, r2);
+    /* Generate a boundary with enough entropy: combine time, pid, and random */
+    unsigned long r1 = (unsigned long)time(NULL);
+    unsigned long r2;
+#if defined(_WIN32)
+    r2 = (unsigned long)GetTickCount();
+#elif defined(__linux__)
+    /* Use /dev/urandom for better randomness */
+    FILE *rnd = fopen("/dev/urandom", "rb");
+    if (rnd) {
+        if (fread(&r2, sizeof(r2), 1, rnd) != 1) r2 = (unsigned long)rand();
+        fclose(rnd);
+    } else {
+        r2 = (unsigned long)rand();
+    }
+#else
+    r2 = (unsigned long)arc4random();
+#endif
+    snprintf(m->boundary, sizeof(m->boundary), "------------------------%08lx%08lx", r1, r2);
 
     return m;
 }
 
 void nurl_multipart_add_file(NurlMultipart *m, const char *field_name, const char *filepath, const char *mime_type) {
-    m->parts = realloc(m->parts, sizeof(MultipartPart) * (m->count + 1));
+    MultipartPart *temp = realloc(m->parts, sizeof(MultipartPart) * (m->count + 1));
+    if (!temp) return; /* OOM: skip this part silently */
+    m->parts = temp;
     MultipartPart *p = &m->parts[m->count];
     p->name = strdup(field_name);
     p->value = NULL;
     p->filepath = strdup(filepath);
     p->mime = mime_type ? strdup(mime_type) : strdup("application/octet-stream");
+    if (!p->name || !p->filepath || !p->mime) {
+        /* Partial OOM: clean up what was allocated */
+        free(p->name); free(p->filepath); free(p->mime);
+        return;
+    }
     p->is_file = true;
     m->count++;
 }
 
 void nurl_multipart_add_field(NurlMultipart *m, const char *name, const char *value) {
-    m->parts = realloc(m->parts, sizeof(MultipartPart) * (m->count + 1));
+    MultipartPart *temp = realloc(m->parts, sizeof(MultipartPart) * (m->count + 1));
+    if (!temp) return; /* OOM: skip this part silently */
+    m->parts = temp;
     MultipartPart *p = &m->parts[m->count];
     p->name = strdup(name);
     p->value = strdup(value);
     p->filepath = NULL;
     p->mime = NULL;
+    if (!p->name || !p->value) {
+        free(p->name); free(p->value);
+        return;
+    }
     p->is_file = false;
     m->count++;
 }
@@ -65,8 +92,13 @@ const char *nurl_multipart_content_type(const NurlMultipart *m) {
 void nurl_multipart_into_request(NurlMultipart *m, NurlRequest *req) {
     if (!m || !req) return;
 
-    // We need 2 * m->count + 1 parts (prefix + body for each part + final boundary)
-    req->body_parts = calloc(2 * m->count + 1, sizeof(NurlBodyPart));
+    /*
+     * Worst-case allocation: each part generates 3 body parts
+     * (header MEM, body MEM/FILE, trailing CRLF MEM) plus 1 final boundary.
+     */
+    size_t max_parts = 3 * m->count + 1;
+    req->body_parts = calloc(max_parts, sizeof(NurlBodyPart));
+    if (!req->body_parts) return;
     req->body_parts_count = 0;
 
     for (size_t i = 0; i < m->count; i++) {
@@ -82,43 +114,64 @@ void nurl_multipart_into_request(NurlMultipart *m, NurlRequest *req) {
                      m->boundary, p->name);
         }
 
-        // Add header part
+        /* Header part (MEM) */
+        uint8_t *hdr_copy = (uint8_t *)strdup(header);
+        if (!hdr_copy) goto oom_cleanup;
         req->body_parts[req->body_parts_count].type = NURL_BODY_PART_MEM;
-        req->body_parts[req->body_parts_count].data = (const uint8_t *)strdup(header);
+        req->body_parts[req->body_parts_count].data = hdr_copy;
         req->body_parts[req->body_parts_count].len = strlen(header);
         req->body_parts_count++;
 
-        // Add body part
+        /* Body part */
         if (p->is_file) {
+            const char *fp = strdup(p->filepath);
+            if (!fp) goto oom_cleanup;
             req->body_parts[req->body_parts_count].type = NURL_BODY_PART_FILE;
-            req->body_parts[req->body_parts_count].filepath = strdup(p->filepath);
-            // We don't know the length yet, or we should get it?
-            // Actually, nurl_http.c should handle FILE part length
+            req->body_parts[req->body_parts_count].filepath = fp;
+            req->body_parts[req->body_parts_count].len = 0; /* determined at send time */
         } else {
+            uint8_t *val_copy = (uint8_t *)strdup(p->value);
+            if (!val_copy) goto oom_cleanup;
             req->body_parts[req->body_parts_count].type = NURL_BODY_PART_MEM;
-            req->body_parts[req->body_parts_count].data = (const uint8_t *)strdup(p->value);
+            req->body_parts[req->body_parts_count].data = val_copy;
             req->body_parts[req->body_parts_count].len = strlen(p->value);
         }
         req->body_parts_count++;
-        
-        // Add trailing CRLF for the part body
-        req->body_parts = realloc(req->body_parts, sizeof(NurlBodyPart) * (req->body_parts_count + 1));
+
+        /* Trailing CRLF after body part */
+        uint8_t *crlf = (uint8_t *)strdup("\r\n");
+        if (!crlf) goto oom_cleanup;
         req->body_parts[req->body_parts_count].type = NURL_BODY_PART_MEM;
-        req->body_parts[req->body_parts_count].data = (const uint8_t *)strdup("\r\n");
+        req->body_parts[req->body_parts_count].data = crlf;
         req->body_parts[req->body_parts_count].len = 2;
         req->body_parts_count++;
     }
 
-    // Final boundary
+    /* Final boundary */
     char final[128];
     snprintf(final, sizeof(final), "--%s--\r\n", m->boundary);
-    req->body_parts = realloc(req->body_parts, sizeof(NurlBodyPart) * (req->body_parts_count + 1));
+    uint8_t *fin_copy = (uint8_t *)strdup(final);
+    if (!fin_copy) goto oom_cleanup;
     req->body_parts[req->body_parts_count].type = NURL_BODY_PART_MEM;
-    req->body_parts[req->body_parts_count].data = (const uint8_t *)strdup(final);
+    req->body_parts[req->body_parts_count].data = fin_copy;
     req->body_parts[req->body_parts_count].len = strlen(final);
     req->body_parts_count++;
 
     nurl_headermap_set(req->headers, "Content-Type", nurl_multipart_content_type(m));
+    return;
+
+oom_cleanup:
+    /* Free any already-allocated parts and signal failure */
+    for (size_t j = 0; j < req->body_parts_count; j++) {
+        if (req->body_parts[j].type == NURL_BODY_PART_MEM) {
+            free((void *)req->body_parts[j].data);
+        } else if (req->body_parts[j].type == NURL_BODY_PART_FILE) {
+            free((void *)req->body_parts[j].filepath);
+        }
+    }
+    free(req->body_parts);
+    req->body_parts = NULL;
+    req->body_parts_count = 0;
 }
 
 void nurl_multipart_free(NurlMultipart *m) {
