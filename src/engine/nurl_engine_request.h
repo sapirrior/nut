@@ -73,6 +73,7 @@ struct NurlRequest {
 
     NurlConnPool *pool;
     struct NurlStream *stream;
+    char             last_tls_error[256];
 };
 
 NurlRequest *nurl_request_new(void);

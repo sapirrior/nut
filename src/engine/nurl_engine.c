@@ -154,6 +154,10 @@ int nurl_engine_execute_request(
 
                 // Stage 3: TLS Handshake
                 if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
+                    const char *tls_err = nurl_tls_last_error(tls);
+                    if (tls_err) {
+                        snprintf(req->last_tls_error, sizeof(req->last_tls_error), "%s", tls_err);
+                    }
                     nurl_tls_free(tls);
                     nurl_net_close(sock_fd);
                     free(scheme); free(host); free(path); free(current_url);
