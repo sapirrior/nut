@@ -1,6 +1,6 @@
-# NetworkURL (nurl)
+# Sonet (nurl)
 
-NetworkURL (`nurl`) is a clean, fast, portable, and structured HTTP client CLI written in C. 
+Sonet (`nurl`) is a clean, fast, portable, and structured HTTP client CLI written in C. 
 
 Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `nurl` is built with a simple design philosophy: **plain text, structured details, and smart diagnostics by default.**
 
@@ -14,20 +14,20 @@ The codebase is organized into nested modules dividing user-interface logic from
 src/
 ├── main.c                  # Program entry point (WSA startup/cleanup)
 ├── cli/                    # CLI Interface Layer
-│   ├── parser/             # Optimized argument parsing (nurl_cli.c)
+│   ├── parser/             # Optimized argument parsing (sonet_cli.c)
 │   └── runner/             # Dispatcher, request execution, & progress reporting
 ├── engine/                 # Protocol & Network Engine Layer
-│   ├── nurl_engine.c       # Central engine request orchestrator (Stage-based)
-│   ├── nurl_engine_request.c # Request builder & HTTP payload initialization
-│   ├── nurl_multipart.c    # Multipart/form-data upload management
-│   ├── nurl_ctx.c          # Engine context & state (Connection Pool)
-│   ├── net/                # Buffered I/O (NurlStream) & Connection Pooling
+│   ├── sonet_engine.c       # Central engine request orchestrator (Stage-based)
+│   ├── sonet_engine_request.c # Request builder & HTTP payload initialization
+│   ├── sonet_multipart.c    # Multipart/form-data upload management
+│   ├── sonet_ctx.c          # Engine context & state (Connection Pool)
+│   ├── net/                # Buffered I/O (SonetStream) & Connection Pooling
 │   ├── tls/                # OpenSSL contexts & verification setup
 │   ├── http/               # HTTP parser, gzip/deflate, redirects
-│   └── utils/              # Cookies, base64, & NurlBuf builder
+│   └── utils/              # Cookies, base64, & SonetBuf builder
 └── errors/                 # Smart Error DX Layer
-    ├── nurl_diag.c         # Concise Unix-style diagnostics
-    └── nurl_error_handler.c # Context-aware diagnostic logic
+    ├── sonet_diag.c         # Concise Unix-style diagnostics
+    └── sonet_error_handler.c # Context-aware diagnostic logic
 ```
 
 ---
@@ -39,14 +39,14 @@ src/
 Furthermore, syntax errors or invalid flags output specific error diagnostics rather than dumping the entire help dialogue:
 
 ```text
-nurl: error: option unrecognized or invalid.
-      hint: run 'nurl --help' for usage.
+sonet: error: option unrecognized or invalid.
+      hint: run 'sonet --help' for usage.
 ```
 
 If a network or file operation fails, `nurl` provides a friendly diagnostic:
 
 ```text
-nurl: error: network connection reset or interrupted during the request to 'https://api.example.com'
+sonet: error: network connection reset or interrupted during the request to 'https://api.example.com'
       hint: check your internet connection or verify if the server is reachable
       hint: since you are downloading a file to disk, you can attempt to pick up where you left off by adding the --resume flag
 ```
@@ -89,20 +89,20 @@ make debug      # Compiles a non-optimized debug build with symbols (`-g3 -O0`)
 
 #### GET Request
 ```bash
-nurl https://httpbin.org/get -i
+sonet https://httpbin.org/get -i
 ```
 *(The `-i` / `--include` option outputs the HTTP response headers above the body).*
 
 #### POST JSON Payload
 ```bash
-nurl https://httpbin.org/post -d '{"tool": "nurl"}' -j
+sonet https://httpbin.org/post -d '{"tool": "sonet"}' -j
 ```
 *(The `-j` flag is shorthand to attach `Content-Type: application/json` headers).*
 
 #### Custom Methods
 ```bash
-nurl https://httpbin.org/put -X PUT -d 'payload'
-nurl https://httpbin.org/delete -X DELETE
+sonet https://httpbin.org/put -X PUT -d 'payload'
+sonet https://httpbin.org/delete -X DELETE
 ```
 
 ---
@@ -112,25 +112,25 @@ nurl https://httpbin.org/delete -X DELETE
 #### Streaming Downloads (`-D`)
 Download files directly to disk. Use `--resume` to pick up a partial transfer:
 ```bash
-nurl https://example.com/large-file.zip -D -o output.zip --resume --progress
+sonet https://example.com/large-file.zip -D -o output.zip --resume --progress
 ```
 
 #### Latency Analysis (`--ping`)
 Measure host response times over TCP/TLS:
 ```bash
-nurl https://api.github.com --ping --count 3
+sonet https://api.github.com --ping --count 3
 ```
 
 #### Dry-run Request Inspection (`--dry-run`)
 Inspect generated headers and body outline **without sending any network traffic**:
 ```bash
-nurl https://api.example.com/data --dry-run -X POST -j
+sonet https://api.example.com/data --dry-run -X POST -j
 ```
 *(Sensitive headers like `Authorization` are automatically redacted as `[hidden]`).*
 
 #### DNS Host Resolution (`--resolve`)
 ```bash
-nurl httpbin.org --resolve
+sonet httpbin.org --resolve
 ```
 
 ---
@@ -139,14 +139,14 @@ nurl httpbin.org --resolve
 
 #### Piping Response to Shell
 ```bash
-nurl https://claude.ai/install.sh -L -s | bash
+sonet https://claude.ai/install.sh -L -s | bash
 ```
 
 #### Sending Stdin Payload
 Automatically read payloads from `stdin` during write requests or when `-d -` is passed:
 ```bash
-echo "hello world" | nurl https://httpbin.org/post -j
-cat image.png | nurl https://api.example.com/upload --upload -
+echo "hello world" | sonet https://httpbin.org/post -j
+cat image.png | sonet https://api.example.com/upload --upload -
 ```
 
 ---
@@ -178,7 +178,7 @@ cat image.png | nurl https://api.example.com/upload --upload -
 
 `nurl` is a highly-optimized **HTTP/1.1** client:
 
-*   **Buffered I/O (8KB)**: Unified `NurlStream` abstraction reduces syscall overhead.
+*   **Buffered I/O (8KB)**: Unified `SonetStream` abstraction reduces syscall overhead.
 *   **Connection Pooling**: Features a proactive pool with 60s idle-eviction.
 *   **TLS 1.2/1.3**: Fully supported via OpenSSL with automatic ALPN.
 *   **Resumable Transfers**: Native support for byte-range resumes.

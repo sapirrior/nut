@@ -3,13 +3,13 @@
 #include <string.h>
 #include <ctype.h>
 #include <signal.h>
-#include "nurl.h"
-#include "nurl_cli.h"
-#include "nurl_dispatch.h"
-#include "cli/config/nurl_config.h"
-#include "nurl_net.h"
-#include "nurl_utils.h"
-#include "nurl_diag.h"
+#include "sonet.h"
+#include "sonet_cli.h"
+#include "sonet_dispatch.h"
+#include "cli/config/sonet_config.h"
+#include "sonet_net.h"
+#include "sonet_utils.h"
+#include "sonet_diag.h"
 
 #ifdef _WIN32
 #include <io.h>
@@ -20,7 +20,7 @@
 #endif
 
 static void print_help(const char *prog_name) {
-    printf("NetworkURL (nurl) — A clean, fast, and structured HTTP client CLI\n\n");
+    printf("Sonet (nurl) — A clean, fast, and structured HTTP client CLI\n\n");
     printf("Usage:\n");
     printf("  %s <URL> [options]\n\n", prog_name);
     printf("Options:\n");
@@ -81,29 +81,29 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
     signal(SIGPIPE, SIG_IGN);
 #endif
-    if (nurl_net_init() != 0) {
-        nurl_diag_err("Network initialization failed.");
+    if (sonet_net_init() != 0) {
+        sonet_diag_err("Network initialization failed.");
         return 1;
     }
 
     CommonArgs args;
     char *url = NULL;
 
-    int parse_res = nurl_cli_parse(argc, argv, &args, &url);
+    int parse_res = sonet_cli_parse(argc, argv, &args, &url);
     if (parse_res != 0) {
         if (parse_res == -1) {
             print_help(argv[0]);
-            nurl_cli_free_args(&args);
-            nurl_net_cleanup();
+            sonet_cli_free_args(&args);
+            sonet_net_cleanup();
             return 0; // Exit with 0 on help
         }
-        nurl_cli_free_args(&args);
-        nurl_net_cleanup();
+        sonet_cli_free_args(&args);
+        sonet_net_cleanup();
         return parse_res;
     }
 
     // Load and merge default configurations
-    nurl_config_load_and_merge(&args);
+    sonet_config_load_and_merge(&args);
 
     char *method = args.method ? strdup(args.method) : strdup("GET");
     for (size_t i = 0; i < strlen(method); i++) {
@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
     bool explicit_stdin = (args.data && strcmp(args.data, "-") == 0);
     if (explicit_stdin || (is_write_method && is_stdin_a_pipe() && !args.data)) {
         size_t stdin_len = 0;
-        char *stdin_payload = nurl_utils_read_stdin(&stdin_len);
+        char *stdin_payload = sonet_utils_read_stdin(&stdin_len);
         if (stdin_payload) {
             if (args.data) free(args.data);
             args.data = stdin_payload;
@@ -123,16 +123,16 @@ int main(int argc, char **argv) {
         }
     }
 
-    NurlCtx *ctx = nurl_ctx_create();
-    int result = nurl_dispatch(ctx, method, url, &args);
-    nurl_ctx_destroy(ctx);
+    SonetCtx *ctx = sonet_ctx_create();
+    int result = sonet_dispatch(ctx, method, url, &args);
+    sonet_ctx_destroy(ctx);
 
     free(method);
     free(url);
-    nurl_cli_free_args(&args);
-    nurl_net_cleanup();
+    sonet_cli_free_args(&args);
+    sonet_net_cleanup();
 
-    if (result == NURL_ERR_HTTP_4XX || result == NURL_ERR_HTTP_5XX) {
+    if (result == SONET_ERR_HTTP_4XX || result == SONET_ERR_HTTP_5XX) {
         return 22;
     }
 
