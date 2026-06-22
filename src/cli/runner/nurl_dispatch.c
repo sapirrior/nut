@@ -147,7 +147,7 @@ static int nurl_mode_ping(const char *url, const CommonArgs *common) {
         err = nurl_http_request(stream, &p, &res);
 
         if (err != NURL_OK) {
-            fprintf(stderr, "ping: request %u failed (error %d)\n", i + 1, err);
+            nurl_diag_err("ping: request %u failed (error %d)", i + 1, err);
             latencies[i] = 0;
         } else {
             unsigned long diff = (unsigned long)((nurl_utils_get_time_sec() - start) * 1000.0);

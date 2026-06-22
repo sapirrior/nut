@@ -174,7 +174,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **url) {
     nurl_cli_infer_method(args);
 
     if (args->data && (nurl_strcasecmp(args->method, "GET") == 0 || nurl_strcasecmp(args->method, "HEAD") == 0)) {
-        fprintf(stderr, "nurl: Warning: sending body with %s is non-standard.\n", args->method);
+        nurl_diag_warn("sending body with %s is non-standard.", args->method);
     }
     if (nurl_strcasecmp(args->method, "HEAD") == 0) args->include = true;
 

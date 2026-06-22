@@ -336,7 +336,7 @@ int nurl_engine_execute_request(
                     res->body = decompressed;
                     res->body_len = decompressed_len;
                 } else {
-                    fprintf(stderr, "nurl: Failed to decompress response payload.\n");
+                    nurl_diag_err("Failed to decompress response payload.");
                     nurl_http_response_free(res);
                     free(scheme); free(host); free(path); free(current_url);
                     return_code = NURL_ERR_GENERIC;
