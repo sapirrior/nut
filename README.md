@@ -1,8 +1,8 @@
-# Nut
+# Nurl
 
-Nut is a clean, fast, portable, and structured HTTP client CLI written in C. 
+Nurl is a clean, fast, portable, and structured HTTP client CLI written in C. 
 
-Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `nut` is built with a simple design philosophy: **plain text, structured details, and smart diagnostics by default.**
+Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `nurl` is built with a simple design philosophy: **plain text, structured details, and smart diagnostics by default.**
 
 ---
 
@@ -15,39 +15,39 @@ src/
 ├── main.c                  # Program entry point (WSA startup/cleanup)
 ├── cli/                    # CLI Interface Layer
 ├── cli/                    # CLI Interface Layer
-│   ├── parser/             # Optimized argument parsing (nut_cli.c)
+│   ├── parser/             # Optimized argument parsing (nurl_cli.c)
 │   └── runner/             # Dispatcher, request execution, & progress reporting
 ├── engine/                 # Protocol & Network Engine Layer
-│   ├── nut_engine.c       # Central engine request orchestrator (Stage-based)
-│   ├── nut_engine_request.c # Request builder & HTTP payload initialization
-│   ├── nut_multipart.c    # Multipart/form-data upload management
-│   ├── nut_ctx.c          # Engine context & state (Connection Pool)
+│   ├── nurl_engine.c       # Central engine request orchestrator (Stage-based)
+│   ├── nurl_engine_request.c # Request builder & HTTP payload initialization
+│   ├── nurl_multipart.c    # Multipart/form-data upload management
+│   ├── nurl_ctx.c          # Engine context & state (Connection Pool)
 │   ├── net/                # Buffered I/O (NutStream) & Connection Pooling
 │   ├── tls/                # OpenSSL contexts & verification setup
 │   ├── http/               # HTTP parser, gzip/deflate, redirects
 │   └── utils/              # Cookies, base64, & NutBuf builder
 └── errors/                 # Smart Error DX Layer
-    ├── nut_diag.c         # Concise Unix-style diagnostics
-    └── nut_error_handler.c # Context-aware diagnostic logic
+    ├── nurl_diag.c         # Concise Unix-style diagnostics
+    └── nurl_error_handler.c # Context-aware diagnostic logic
 ```
 
 ---
 
 ## 2. Smart Error DX (Developer Experience)
 
-`nut` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints.
+`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints.
 
 Furthermore, syntax errors or invalid flags output specific error diagnostics rather than dumping the entire help dialogue:
 
 ```text
-nut: error: option unrecognized or invalid.
-      hint: run 'nut --help' for usage.
+nurl: error: option unrecognized or invalid.
+      hint: run 'nurl --help' for usage.
 ```
 
-If a network or file operation fails, `nut` provides a friendly diagnostic:
+If a network or file operation fails, `nurl` provides a friendly diagnostic:
 
 ```text
-nut: error: network connection reset or interrupted during the request to 'https://api.example.com'
+nurl: error: network connection reset or interrupted during the request to 'https://api.example.com'
       hint: check your internet connection or verify if the server is reachable
       hint: since you are downloading a file to disk, you can attempt to pick up where you left off by adding the --resume flag
 ```
@@ -73,7 +73,7 @@ The [Makefile](Makefile) is tuned for production-grade builds:
 *   **Cross-Platform**: Full support for Linux, macOS, and Windows (MinGW).
 
 ### Testing & Debugging
-`nut` ships with a full suite of unit and integration tests to ensure reliability:
+`nurl` ships with a full suite of unit and integration tests to ensure reliability:
 ```bash
 make test       # Runs the C unit test runner and bash integration suite
 make asan       # Builds the project with AddressSanitizer and UndefinedBehaviorSanitizer
@@ -84,26 +84,26 @@ make debug      # Compiles a non-optimized debug build with symbols (`-g3 -O0`)
 
 ## 4. Command Usage Guide
 
-`nut` uses a modern, flag-triggered CLI model. There are no subcommands; behavior is determined by flags.
+`nurl` uses a modern, flag-triggered CLI model. There are no subcommands; behavior is determined by flags.
 
 ### 4.1. Standard REST Operations
 
 #### GET Request
 ```bash
-nut https://httpbin.org/get -i
+nurl https://httpbin.org/get -i
 ```
 *(The `-i` / `--include` option outputs the HTTP response headers above the body).*
 
 #### POST JSON Payload
 ```bash
-nut https://httpbin.org/post -d '{"tool": "nut"}' -j
+nurl https://httpbin.org/post -d '{"tool": "nurl"}' -j
 ```
 *(The `-j` flag is shorthand to attach `Content-Type: application/json` headers).*
 
 #### Custom Methods
 ```bash
-nut https://httpbin.org/put -X PUT -d 'payload'
-nut https://httpbin.org/delete -X DELETE
+nurl https://httpbin.org/put -X PUT -d 'payload'
+nurl https://httpbin.org/delete -X DELETE
 ```
 
 ---
@@ -113,25 +113,25 @@ nut https://httpbin.org/delete -X DELETE
 #### Streaming Downloads (`-D`)
 Download files directly to disk. Use `--resume` to pick up a partial transfer:
 ```bash
-nut https://example.com/large-file.zip -D -o output.zip --resume --progress
+nurl https://example.com/large-file.zip -D -o output.zip --resume --progress
 ```
 
 #### Latency Analysis (`--ping`)
 Measure host response times over TCP/TLS:
 ```bash
-nut https://api.github.com --ping --count 3
+nurl https://api.github.com --ping --count 3
 ```
 
 #### Dry-run Request Inspection (`--dry-run`)
 Inspect generated headers and body outline **without sending any network traffic**:
 ```bash
-nut https://api.example.com/data --dry-run -X POST -j
+nurl https://api.example.com/data --dry-run -X POST -j
 ```
 *(Sensitive headers like `Authorization` are automatically redacted as `[hidden]`).*
 
 #### DNS Host Resolution (`--resolve`)
 ```bash
-nut httpbin.org --resolve
+nurl httpbin.org --resolve
 ```
 
 ---
@@ -140,14 +140,14 @@ nut httpbin.org --resolve
 
 #### Piping Response to Shell
 ```bash
-nut https://claude.ai/install.sh -L -s | bash
+nurl https://claude.ai/install.sh -L -s | bash
 ```
 
 #### Sending Stdin Payload
 Automatically read payloads from `stdin` during write requests or when `-d -` is passed:
 ```bash
-echo "hello world" | nut https://httpbin.org/post -j
-cat image.png | nut https://api.example.com/upload --upload -
+echo "hello world" | nurl https://httpbin.org/post -j
+cat image.png | nurl https://api.example.com/upload --upload -
 ```
 
 ---
@@ -177,7 +177,7 @@ cat image.png | nut https://api.example.com/upload --upload -
 
 ## 6. Protocol Support
 
-`nut` is a highly-optimized **HTTP/1.1** client:
+`nurl` is a highly-optimized **HTTP/1.1** client:
 
 *   **Buffered I/O (8KB)**: Unified `NutStream` abstraction reduces syscall overhead.
 *   **Connection Pooling**: Features a proactive pool with 60s idle-eviction.
@@ -190,7 +190,7 @@ cat image.png | nut https://api.example.com/upload --upload -
 
 ## 7. Cross-Platform Compatibility
 
-`nut` runs identically on **Linux, macOS, and Windows**:
+`nurl` runs identically on **Linux, macOS, and Windows**:
 *   **Windows (Winsock)**: Native support for Winsock2 and `WSAPoll`.
 *   **Portable Timers**: High-resolution timing using OS-native primitives.
 *   **Static Build**: Portable binary with zero runtime library dependencies.
